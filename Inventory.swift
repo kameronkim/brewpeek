@@ -44,6 +44,7 @@ final class Inventory {
     env["HOMEBREW_NO_AUTO_UPDATE"] = "1"
     env["HOMEBREW_NO_API_AUTO_UPDATE"] = "1"
     env["HOMEBREW_NO_ANALYTICS"] = "1"
+    env["HOMEBREW_NO_UPDATE_CLEANUP"] = "1"
     env["PATH"] =
       URL(fileURLWithPath: brew).deletingLastPathComponent().path + ":/usr/bin:/bin:/usr/sbin:/sbin"
     task.environment = env
@@ -108,7 +109,37 @@ final class Inventory {
         })
     ).sorted()
   }
+  /// Use Homebrew's outdated result, including its default cask and revision rules.
+  func checkUpdates() -> (formulae: [String: String], casks: [String: String], state: Record) {
+    do {
+      _ = try run(brew, ["update", "--quiet"], timeout: 90)
+      let text = try run(brew, ["outdated", "--json=v2"], timeout: 90)
+      guard let result = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? Record else {
+        throw InventoryError(message: "Homebrew 업데이트 정보를 읽지 못했습니다.")
+      }
+      func versions(_ value: Any?) throws -> [String: String] {
+        guard let records = value as? [Record] else {
+          throw InventoryError(message: "Homebrew 업데이트 목록의 형식이 올바르지 않습니다.")
+        }
+        var versions: [String: String] = [:]
+        for record in records {
+          guard let name = record["name"] as? String, !name.isEmpty,
+            let version = record["current_version"] as? String, !version.isEmpty
+          else { throw InventoryError(message: "Homebrew 업데이트 버전 정보가 누락되었습니다.") }
+          versions[name] = version
+        }
+        return versions
+      }
+      return (
+        try versions(result["formulae"]), try versions(result["casks"]),
+        ["status": "succeeded"]
+      )
+    } catch {
+      return ([:], [:], ["status": "failed", "error": error.localizedDescription])
+    }
+  }
   func collect() throws -> Record {
+    let updates = checkUpdates()
     let text = try run(brew, ["info", "--json=v2", "--installed"])
     guard let raw = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? Record,
       let formulae = raw["formulae"] as? [Record], let casks = raw["casks"] as? [Record]
@@ -137,6 +168,7 @@ final class Inventory {
       }
       formulas.append([
         "name": name, "displayName": name, "version": versions.joined(separator: ", "),
+        "availableVersion": nullable(updates.formulae[formula["full_name"] as? String ?? name]),
         "type": "formula", "description": formula["desc"] ?? null, "tap": formula["tap"] ?? null,
         "category": category(name, formula["desc"] as? String ?? ""), "leaf": leaves.contains(name),
         "direct": receipts.contains { $0["installed_on_request"] as? Bool == true },
@@ -175,6 +207,7 @@ final class Inventory {
       let names = cask["name"] as? [String] ?? [name]
       applications.append([
         "name": name, "displayName": names.joined(separator: " / "), "version": version,
+        "availableVersion": nullable(updates.casks[name]),
         "type": "cask", "description": cask["desc"] ?? null, "tap": cask["tap"] ?? null,
         "category": "Other", "leaf": false, "direct": null, "homepage": cask["homepage"] ?? null,
         "dependencies": (cask["depends_on"] as? Record)?["formula"] ?? [String](), "usedBy": null,
@@ -193,7 +226,10 @@ final class Inventory {
       "build": try run("/usr/bin/sw_vers", ["-buildVersion"]), "cellarSize": nullable(size(cellar)),
       "caskSize": nullable(size(caskroom)),
     ]
-    return ["formulae": formulas, "casks": applications, "taps": taps, "environment": environment]
+    return [
+      "formulae": formulas, "casks": applications, "taps": taps, "environment": environment,
+      "updateCheck": updates.state,
+    ]
   }
   func generate(output: URL) throws {
     try FileManager.default.createDirectory(

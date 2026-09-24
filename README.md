@@ -50,6 +50,8 @@ Click **Name**, **Version**, or **Status** in a table header to sort the list. C
 
 Click a package row to expand its details. Click it again to collapse it.
 
+The **Version** column shows the installed version. When Homebrew reports an update, a smaller **Available: version** line appears underneath.
+
 The detail view includes:
 
 - **Category and install origin** — The package category and whether a formula was explicitly requested.
@@ -67,7 +69,7 @@ The **Environment** section shows your Homebrew installation prefix and version,
 
 ## Refreshing and saved data
 
-BrewPeek collects information when it opens. Use **Refresh** or **⌘R** to collect it again after installing, updating, or removing packages with Homebrew. The footer shows when the displayed information was last collected.
+BrewPeek collects information when it opens and checks for new versions using Homebrew’s package information and update rules. Use **Refresh** or **⌘R** to collect it again after installing, updating, or removing packages with Homebrew. The footer shows when the displayed information was last collected.
 
 The latest inventory is saved locally at:
 
