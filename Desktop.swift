@@ -157,8 +157,19 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     guard pageReady, FileManager.default.fileExists(atPath: output.path) else { return }
     do {
       let snapshot = try InventoryStore.load(output)
+      // Rebuild the sticky layer after layout changes while returning from the loading view.
+      web.isHidden = false
       web.callAsyncJavaScript(
-        "window.setInventory(snapshot); return true", arguments: ["snapshot": snapshot], in: nil,
+        """
+        const toolbar = document.querySelector('.toolbar');
+        toolbar.style.position = 'relative';
+        window.setInventory(snapshot);
+        await new Promise(requestAnimationFrame);
+        await new Promise(requestAnimationFrame);
+        toolbar.style.removeProperty('position');
+        return true;
+        """,
+        arguments: ["snapshot": snapshot], in: nil,
         in: .page
       ) { result in
         if case .failure(let error) = result {

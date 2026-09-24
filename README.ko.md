@@ -36,11 +36,14 @@ Mac에 Homebrew가 설치되어 있다면 `BrewPeek.app`을 실행하세요. 설
 | 필터 | 표시하는 항목 |
 |---|---|
 | All | 설치된 전체 패키지 |
+| Updates | 새 버전이 있는 패키지. 대상이 있을 때만 개수와 함께 표시 |
 | Formula | Formula 패키지 |
 | Cask | Cask 패키지 |
 | Leaf | Leaf로 분류된 Formula |
 | Dependency | Leaf로 분류되지 않은 Formula |
 | Direct | 직접 설치 요청한 것으로 기록된 Formula |
+
+Updates에는 Formula와 Cask가 함께 표시됩니다. 새로고침 후 업데이트 대상이 없어지면 필터가 사라지고, Updates를 선택 중이었다면 All로 돌아갑니다.
 
 **Direct**는 설치 요청 여부, **Leaf**는 의존 관계에 따른 상태입니다. 하나의 Formula에 두 표시가 함께 나타날 수 있습니다.
 
