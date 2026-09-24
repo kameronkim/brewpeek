@@ -1,6 +1,4 @@
-<img src="resources/AppIcon.png" alt="BrewPeek app icon" width="128" height="128">
-
-# BrewPeek
+<h1><img src="resources/AppIcon.png" alt="" width="64" height="64" align="absmiddle"> BrewPeek</h1>
 
 **Homebrew로 설치한 패키지를 한눈에.**
 
@@ -33,7 +31,7 @@ Mac에 Homebrew가 설치되어 있다면 `BrewPeek.app`을 실행하세요. 설
 
 ## 패키지 검색과 정렬
 
-**Search packages...**에 이름이나 설명을 입력해 패키지를 찾습니다. **All categories**에서 카테고리를 선택하면 범위를 좁힐 수 있습니다. 검색어, 카테고리, 아래 필터는 함께 적용됩니다.
+**Search packages...** 에 이름이나 설명을 입력해 패키지를 찾습니다. **All categories**에서 카테고리를 선택하면 범위를 좁힐 수 있습니다. 검색어, 카테고리, 아래 필터는 함께 적용됩니다.
 
 | 필터 | 표시하는 항목 |
 |---|---|
@@ -81,4 +79,5 @@ BrewPeek는 실행할 때 설치 정보를 수집합니다. Homebrew로 패키�
 
 ## BrewPeek 제거
 
-상단 **BrewPeek** 앱 메뉴에서 **BrewPeek 제거…**를 선택합니다. 확인 창에서 **휴지통으로 이동**을 누르면 앱과 저장 데이터가 휴지통으로 이동합니다. Homebrew로 설치한 패키지는 그대로 유지됩니다.
+상단 **BrewPeek** 앱 메뉴에서 **BrewPeek 제거…** 를 선택합니다. 확인 창에서 **휴지통으로 이동**을 누르면 앱과 저장 데이터가 휴지통으로 이동합니다. Homebrew로 설치한 패키지는 
+그대로 유지됩니다.
