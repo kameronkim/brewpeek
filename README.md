@@ -36,11 +36,14 @@ Enter a package name or description in **Search packages...**. Use **All categor
 | Filter | Shows |
 |---|---|
 | All | All installed packages |
+| Updates | Packages with an available update; shown with a count only when updates are available |
 | Formula | Formula packages |
 | Cask | Cask packages |
 | Leaf | Formulae marked as leaves |
 | Dependency | Formulae not marked as leaves |
 | Direct | Formulae recorded as explicitly requested |
+
+The Updates filter includes both formulae and casks. If a refresh finds no available updates, it disappears and the selected Updates filter returns to All.
 
 **Direct** describes how a formula was installed; **Leaf** describes its dependency status. A formula can have both labels.
 
