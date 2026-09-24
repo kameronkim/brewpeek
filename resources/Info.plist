@@ -6,8 +6,6 @@
 	<string>BrewPeek</string>
 	<key>CFBundleExecutable</key>
 	<string>BrewPeek</string>
-	<key>CFBundleIconFile</key>
-	<string>AppIcon.icns</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.kameronkim.brewpeek</string>
 	<key>CFBundleName</key>
@@ -15,9 +13,9 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.3.0</string>
+	<string>0.3.1</string>
 	<key>CFBundleVersion</key>
-	<string>3</string>
+	<string>4</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>12.0</string>
 	<key>NSHighResolutionCapable</key>
