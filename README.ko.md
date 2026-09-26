@@ -1,4 +1,4 @@
-<h1><img src="resources/AppIcon.png" alt="" width="64" height="64" align="absmiddle"> BrewPeek</h1>
+<h1><img src="BrewPeek/Resources/AppIcon.png" alt="" width="64" height="64" align="absmiddle"> BrewPeek</h1>
 
 **Homebrew로 설치한 패키지를 한눈에.**
 

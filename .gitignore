@@ -1,4 +1,5 @@
-.DS_Store
 *.app/
-.build/
 *.dSYM/
+.build/
+.DS_Store
+/dist/
