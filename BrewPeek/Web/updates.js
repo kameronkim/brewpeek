@@ -9,6 +9,7 @@ let popupScroll = null,
   activity = [],
   activitySizes = [],
   activityBytes = 0,
+  activityDirty = false,
   progressPackages = [],
   progressStates = {};
 let popupReturnFocus = null;
@@ -247,11 +248,21 @@ function appendActivity(line) {
     activityBytes -= activitySizes.shift();
     activity.shift();
   }
+  activityDirty = true;
+}
+function paintActivity() {
+  const log = $('activity-log');
+  if (!activityDirty || !log || !$('progress-log').open) return;
+  const bottom = log.scrollHeight - log.scrollTop - log.clientHeight < 30;
+  log.textContent = activity.join('\n');
+  activityDirty = false;
+  if (bottom) log.scrollTop = log.scrollHeight;
 }
 function clearProgressData() {
   activity = [];
   activitySizes = [];
   activityBytes = 0;
+  activityDirty = false;
   progressPackages = [];
   progressStates = {};
   processedPackages = 0;
@@ -263,41 +274,57 @@ function beginProgress(plan) {
   setUpdateMode('running');
   $('operation').innerHTML =
     `<section class="operation"><div class="operation-top"><div><div class="eyebrow" id="operation-phase">UPDATE IN PROGRESS</div><h3><span class="pulse"></span><span id="operation-title">Updating packages</span></h3><p id="operation-copy">Homebrew controls parallel downloads and installation order.</p></div></div><div class="progress-summary"><span>Packages processed · including dependencies</span><span id="processed">0 of ${progressPackages.length}</span></div><div class="progress-track"><div class="progress-fill" id="overall-fill"></div></div><p id="discovered" hidden>Additional related changes detected. The total includes these packages.</p><details id="progress-items"><summary id="progress-count"></summary><div class="bounded-list" id="progress-rows"></div></details><details id="progress-log"><summary>Show activity</summary><pre id="activity-log"></pre></details></section>`;
+  $('progress-items').ontoggle = () => paintProgress();
+  $('progress-log').ontoggle = paintActivity;
   paintProgress(0);
   scrollOperationIntoView();
+}
+function setProgressText(element, text) {
+  if (element.textContent === text) return false;
+  element.textContent = text;
+  return true;
 }
 function paintProgress(processed = processedPackages) {
   processedPackages = processed;
   if (!$('progress-rows')) return;
-  $('processed').textContent = `${processed} of ${progressPackages.length}`;
-  $('overall-fill').style.width =
-    `${progressPackages.length ? (processed / progressPackages.length) * 100 : 0}%`;
-  $('progress-count').textContent = `Package details · ${progressPackages.length}`;
-  $('discovered').hidden = !progressPackages.some((p) => p.reason === 'Detected during execution');
+  const fill = $('overall-fill');
+  if (
+    setProgressText($('processed'), `${processed} of ${progressPackages.length}`) ||
+    !fill.style.width
+  )
+    fill.style.width = `${progressPackages.length ? (processed / progressPackages.length) * 100 : 0}%`;
+  setProgressText($('progress-count'), `Package details · ${progressPackages.length}`);
+  const undiscovered = !progressPackages.some((p) => p.reason === 'Detected during execution');
+  if ($('discovered').hidden !== undiscovered) $('discovered').hidden = undiscovered;
+  // Keep the latest state in memory; collapsed details catch up when opened.
+  if (!$('progress-items').open) return;
   const container = $('progress-rows');
+  const rows = new Map([...container.children].map((node) => [node.dataset.package, node]));
   for (const p of progressPackages) {
-    let row = [...container.children].find((node) => node.dataset.package === p.id);
+    let row = rows.get(p.id);
     if (!row) {
       row = document.createElement('div');
       row.className = 'download-item';
       row.dataset.package = p.id;
       row.innerHTML = `<span>${esc(p.name)}<small class="dependency-note">${esc(p.relationship || p.reason)}</small></span><div class="progress-track"><div class="progress-fill"></div></div><span class="download-state"></span>`;
       container.append(row);
+      rows.set(p.id, row);
     }
-    row.querySelector('.dependency-note').textContent = p.relationship || p.reason;
+    setProgressText(row.querySelector('.dependency-note'), p.relationship || p.reason);
     const text =
       updateMode === 'verifying'
         ? 'Verifying installed version…'
         : progressStates[p.id] || 'Waiting for Homebrew';
-    row.querySelector('.download-state').textContent = text;
-    row
-      .querySelector('.progress-track')
-      .classList.toggle(
-        'indeterminate',
-        !['Waiting for Homebrew', 'Awaiting verification'].includes(text)
-      );
-    row.querySelector('.progress-fill').style.width =
-      text === 'Awaiting verification' ? '100%' : '0%';
+    const fill = row.querySelector('.progress-fill');
+    if (setProgressText(row.querySelector('.download-state'), text) || !fill.style.width) {
+      row
+        .querySelector('.progress-track')
+        .classList.toggle(
+          'indeterminate',
+          !['Waiting for Homebrew', 'Awaiting verification'].includes(text)
+        );
+      fill.style.width = text === 'Awaiting verification' ? '100%' : '0%';
+    }
   }
 }
 function paintResult(result) {
@@ -362,12 +389,7 @@ window.receiveUpdate = function (event) {
       if (event.packages) progressPackages = event.packages;
       progressStates = event.states;
       appendActivity(event.line);
-      const log = $('activity-log');
-      if (log) {
-        const bottom = log.scrollHeight - log.scrollTop - log.clientHeight < 30;
-        log.textContent = activity.join('\n');
-        if (bottom) log.scrollTop = log.scrollHeight;
-      }
+      paintActivity();
       paintProgress(event.processed);
       break;
     }
