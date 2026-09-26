@@ -110,6 +110,10 @@ function showNotice(title, copy, command = '', kind = 'info') {
   if (!$('notice').open) $('notice').showModal();
 }
 $('notice-ok').onclick = () => $('notice').close();
+$('notice').addEventListener('close', () => {
+  if ($('notice').open) return;
+  for (const id of ['notice-title', 'notice-copy', 'notice-command']) $(id).textContent = '';
+});
 function checkChanges(keys, trigger = document.activeElement) {
   if (updateBusy() || inventoryRefreshState !== 'idle' || !keys.length) return;
   if (!popupScroll) popupReturnFocus = captureInventoryFocus(trigger);
@@ -186,6 +190,11 @@ $('cancel').onclick = () => {
   $('confirm').close();
 };
 $('confirm').addEventListener('cancel', cancelUpdate);
+$('confirm').addEventListener('close', () => {
+  if ($('confirm').open) return;
+  $('confirm-list').replaceChildren();
+  $('confirm-error').replaceChildren();
+});
 $('confirm').addEventListener('keydown', (event) => {
   if (updateMode !== 'confirming' || event.altKey || event.ctrlKey || event.metaKey) return;
   const list = document.querySelector('.confirm-scroll');
@@ -239,12 +248,17 @@ function appendActivity(line) {
     activity.shift();
   }
 }
-function beginProgress(plan) {
-  previousResult = null;
+function clearProgressData() {
   activity = [];
   activitySizes = [];
   activityBytes = 0;
+  progressPackages = [];
   progressStates = {};
+  processedPackages = 0;
+}
+function beginProgress(plan) {
+  previousResult = null;
+  clearProgressData();
   progressPackages = plan.packages;
   setUpdateMode('running');
   $('operation').innerHTML =
@@ -298,7 +312,10 @@ function paintResult(result) {
   $('dismiss').onclick = () => {
     const view = captureInventoryView();
     previousResult = null;
+    requestedKeys = [];
+    activeRequest = null;
     $('operation').replaceChildren();
+    setUpdateMode('ready');
     restoreInventoryView(view);
   };
   document.querySelectorAll('[data-retry]').forEach(
@@ -363,11 +380,15 @@ window.receiveUpdate = function (event) {
       break;
     case 'result': {
       const view = captureInventoryView();
+      // The inventory owns the snapshot; retained results only need display and retry data.
+      const { snapshot, ...result } = event;
       updatePlan = null;
-      previousResult = event;
+      activeRequest = null;
+      clearProgressData();
+      previousResult = result;
       setUpdateMode('result');
-      if (event.snapshot) window.setInventory(event.snapshot);
-      paintResult(event);
+      if (snapshot) window.setInventory(snapshot);
+      paintResult(result);
       restoreInventoryView(view);
       syncActionAvailability();
       finishNotice();
@@ -375,11 +396,13 @@ window.receiveUpdate = function (event) {
       break;
     }
     case 'error':
+      clearProgressData();
       if (['checking', 'confirming', 'check-failed'].includes(updateMode)) {
         showCheckError(event.message, event.runningApps);
         break;
       }
       updatePlan = null;
+      activeRequest = null;
       setUpdateMode(previousResult ? 'result' : 'ready');
       if (previousResult) paintResult(previousResult);
       else
