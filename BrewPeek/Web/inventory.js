@@ -239,10 +239,7 @@ window.setInventory = function (data) {
   const updateCount = allPackages.filter((p) => Boolean(p.availableVersion)).length;
   updates.hidden = updateCount === 0;
   updates.textContent = `Updates ${updateCount}`;
-  if (!updateCount && state.filter === 'updates') {
-    state.filter = 'all';
-    if (document.activeElement === updates) document.querySelector('[data-filter="all"]').focus();
-  }
+  if (!updateCount && state.filter === 'updates') state.filter = 'all';
 
   const category = $('category');
   category.innerHTML = '<option value="all">All categories</option>';

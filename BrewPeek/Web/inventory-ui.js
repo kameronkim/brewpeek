@@ -12,23 +12,21 @@ function captureInventoryFocus(element = document.activeElement) {
     section: element.closest('.section')?.id
   };
 }
-function restoreInventoryFocus(focus, fallback) {
+function restoreInventoryFocus(focus) {
   if (!focus) return;
   let element = focus.element.isConnected ? focus.element : focus.id ? $(focus.id) : null;
   if (focus.key && (!element || element.disabled)) {
     const row = [...document.querySelectorAll('.package-row')].find(
       (r) => r.dataset.key === focus.key
     );
-    element = focus.update ? row?.querySelector('[data-update]:not(:disabled)') : null;
-    element ||= row?.querySelector('.package-button');
+    element = row?.querySelector(focus.update ? '[data-update]:not(:disabled)' : '.package-button');
   }
   if (!element && focus.sort) {
     const section = focus.section ? $(focus.section) : document;
     element = section?.querySelector(`[data-sort="${CSS.escape(focus.sort)}"]`);
   }
-  if (!element || element.disabled || !element.getClientRects().length)
-    element = fallback || $('search');
-  element?.focus({ preventScroll: true });
+  if (!element || element.disabled || !element.getClientRects().length) return;
+  element.focus({ preventScroll: true });
 }
 function captureInventoryView() {
   const toolbarBottom = document.querySelector('.toolbar').getBoundingClientRect().bottom;
@@ -70,7 +68,7 @@ function restoreInventoryView(view) {
   const anchor = view.anchors.find((a) => rows.has(a.key));
   const row = anchor && rows.get(anchor.key);
   scrollTo(view.x, row ? scrollY + row.getBoundingClientRect().top - anchor.top : view.y);
-  restoreInventoryFocus(view.focus, row?.querySelector('.package-button'));
+  restoreInventoryFocus(view.focus);
 }
 function refreshInventoryStatus() {
   const updated = brewData.environment?.updated;
