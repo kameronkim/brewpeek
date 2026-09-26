@@ -9,7 +9,30 @@ struct InventoryError: LocalizedError {
 final class Inventory {
   let brew: String
   let null = NSNull()
+  private let processLock = NSLock()
+  private var cancelled = false
+  private var currentProcess: Process?
   init(brew: String) { self.brew = brew }
+  func cancel() {
+    processLock.lock()
+    cancelled = true
+    let task = currentProcess
+    if let task, task.isRunning { task.terminate() }
+    processLock.unlock()
+    // App termination must not leave the current read-only command running.
+    if let task, task.isRunning {
+      let deadline = ProcessInfo.processInfo.systemUptime + 0.2
+      while task.isRunning && ProcessInfo.processInfo.systemUptime < deadline {
+        Thread.sleep(forTimeInterval: 0.01)
+      }
+      if task.isRunning { kill(task.processIdentifier, SIGKILL) }
+    }
+  }
+  private func checkCancellation() throws {
+    processLock.lock()
+    defer { processLock.unlock() }
+    if cancelled { throw InventoryError(message: "정보 수집을 취소했습니다.") }
+  }
   static func locateBrew() throws -> String {
     let candidates =
       ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]
@@ -23,6 +46,7 @@ final class Inventory {
     return result
   }
   func run(_ executable: String, _ arguments: [String], timeout: Double = 180) throws -> String {
+    try checkCancellation()
     let fm = FileManager.default
     let dir = fm.temporaryDirectory.appendingPathComponent("brew-report-" + UUID().uuidString)
     try fm.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -53,7 +77,24 @@ final class Inventory {
     task.standardInput = FileHandle.nullDevice
     let finished = DispatchSemaphore(value: 0)
     task.terminationHandler = { _ in finished.signal() }
-    try task.run()
+    processLock.lock()
+    if cancelled {
+      processLock.unlock()
+      throw InventoryError(message: "정보 수집을 취소했습니다.")
+    }
+    do {
+      try task.run()
+      currentProcess = task
+    } catch {
+      processLock.unlock()
+      throw error
+    }
+    processLock.unlock()
+    defer {
+      processLock.lock()
+      currentProcess = nil
+      processLock.unlock()
+    }
     if finished.wait(timeout: .now() + timeout) == .timedOut {
       task.terminate()
       if finished.wait(timeout: .now() + 2) == .timedOut {
@@ -63,6 +104,7 @@ final class Inventory {
       throw InventoryError(
         message: "명령 실행 시간이 초과되었습니다: " + executable + " " + arguments.joined(separator: " "))
     }
+    try checkCancellation()
     guard task.terminationStatus == 0 else {
       let detail = (try? String(contentsOf: err, encoding: .utf8)) ?? ""
       throw InventoryError(
@@ -110,9 +152,11 @@ final class Inventory {
     ).sorted()
   }
   /// Use Homebrew's outdated result, including its default cask and revision rules.
-  func checkUpdates() -> (formulae: [String: String], casks: [String: String], state: Record) {
+  func checkUpdates(refreshMetadata: Bool = true) -> (
+    formulae: [String: String], casks: [String: String], state: Record
+  ) {
     do {
-      _ = try run(brew, ["update", "--quiet"], timeout: 90)
+      if refreshMetadata { _ = try run(brew, ["update", "--quiet"], timeout: 90) }
       let text = try run(brew, ["outdated", "--json=v2"], timeout: 90)
       guard let result = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? Record else {
         throw InventoryError(message: "Homebrew 업데이트 정보를 읽지 못했습니다.")
@@ -138,8 +182,8 @@ final class Inventory {
       return ([:], [:], ["status": "failed", "error": error.localizedDescription])
     }
   }
-  func collect() throws -> Record {
-    let updates = checkUpdates()
+  func collect(refreshMetadata: Bool = true) throws -> Record {
+    let updates = checkUpdates(refreshMetadata: refreshMetadata)
     let text = try run(brew, ["info", "--json=v2", "--installed"])
     guard let raw = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? Record,
       let formulae = raw["formulae"] as? [Record], let casks = raw["casks"] as? [Record]
@@ -167,6 +211,7 @@ final class Inventory {
         throw InventoryError(message: "설치 버전 누락: " + name)
       }
       formulas.append([
+        "id": "formula:" + (formula["full_name"] as? String ?? name),
         "name": name, "displayName": name, "version": versions.joined(separator: ", "),
         "availableVersion": nullable(updates.formulae[formula["full_name"] as? String ?? name]),
         "type": "formula", "description": formula["desc"] ?? null, "tap": formula["tap"] ?? null,
@@ -206,6 +251,7 @@ final class Inventory {
         ?? null
       let names = cask["name"] as? [String] ?? [name]
       applications.append([
+        "id": "cask:" + (cask["full_token"] as? String ?? name),
         "name": name, "displayName": names.joined(separator: " / "), "version": version,
         "availableVersion": nullable(updates.casks[name]),
         "type": "cask", "description": cask["desc"] ?? null, "tap": cask["tap"] ?? null,
@@ -245,6 +291,7 @@ final class Inventory {
     }
     defer { flock(fd, LOCK_UN) }
     let snapshot = try collect()
+    try checkCancellation()
     try InventoryStore.save(snapshot, to: output)
   }
 }

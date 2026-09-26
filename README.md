@@ -1,4 +1,4 @@
-<h1><img src="resources/AppIcon.png" alt="" width="64" height="64" align="absmiddle"> BrewPeek</h1>
+<h1><img src="BrewPeek/Resources/AppIcon.png" alt="" width="64" height="64" align="absmiddle"> BrewPeek</h1>
 
 **Your installed Homebrew packages, at a glance.**
 
@@ -8,12 +8,12 @@ BrewPeek is a macOS app for exploring the command-line tools and applications in
 
 ## Getting started
 
-With Homebrew installed on your Mac, open `BrewPeek.app`. BrewPeek collects your installation information and displays the package list.
+With Homebrew installed on your Mac, open `BrewPeek.app`. BrewPeek shows your saved package list first while checking for current information. On first launch, it collects your installation information before displaying the list.
 
 1. Check the overview for a summary of your installation.
 2. Search or filter the list to find a package.
 3. Click a package row to expand its details.
-4. After changing your Homebrew installation, click **Refresh** or press **⌘R**.
+4. After changing your Homebrew installation, click **Refresh**.
 
 ## Reading the overview
 
@@ -66,13 +66,23 @@ The detail view includes:
 
 For casks, the Homebrew installation and the actual app bundle are shown separately, so you can inspect both the Caskroom record and the app itself.
 
+## Updating packages
+
+Click **Update** beside a package version, or **Update all** to update all available packages. Update all appears next to Refresh whenever updates are available, even if you are viewing a different filter.
+
+BrewPeek asks Homebrew to check the changes first. The confirmation table shows each package's **Current** and **New** versions, including related dependencies. Where the relationship is known, **Required by** or **Uses** explains why a related package is included. New dependencies are marked **Not installed**. Review the list and click **Update** to begin.
+
+Homebrew manages the downloads and installation order. The progress panel shows package activity and the number processed; expand **Package details** or **Show activity** for more information. Keep BrewPeek open until the operation finishes.
+
+BrewPeek checks installed versions before reporting the results and refreshes the inventory. Failed or skipped items can be retried. Close a running app before updating it; if administrator permission is required, **View Terminal command** provides the command to run in Terminal. After running it, return to BrewPeek and refresh.
+
 ## Checking your environment
 
 The **Environment** section shows your Homebrew installation prefix and version, Mac architecture, macOS version, and the disk usage of the Cellar and Caskroom. **Additional taps** lists the extra package repositories registered with Homebrew.
 
 ## Refreshing and saved data
 
-BrewPeek collects information when it opens and checks for new versions using Homebrew’s package information and update rules. Use **Refresh** or **⌘R** to collect it again after installing, updating, or removing packages with Homebrew. The footer shows when the displayed information was last collected.
+BrewPeek shows the saved inventory when it opens, then checks current installation information and new versions using Homebrew’s package information and update rules. You can search and inspect packages during a refresh; update actions become available when the check finishes. Use **Refresh** to collect it again after installing, updating, or removing packages with Homebrew. Refreshing keeps the existing page, search, filters, sort order, expanded details, and reading position. The footer shows when the displayed information was last collected. If collection fails, the saved inventory remains visible with a refresh failure status; use **Refresh** to try again.
 
 The latest inventory is saved locally at:
 
