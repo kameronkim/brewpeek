@@ -7,6 +7,8 @@ let activeRequest = null;
 let processedPackages = 0;
 let popupScroll = null,
   activity = [],
+  activitySizes = [],
+  activityBytes = 0,
   progressPackages = [],
   progressStates = {};
 let popupReturnFocus = null;
@@ -217,9 +219,31 @@ $('packages').addEventListener(
   true
 );
 bulk.onclick = () => checkChanges(allPackages.filter((p) => p.availableVersion).map(key), bulk);
+const activityByteLimit = 1_000_000;
+const activityEncoder = new TextEncoder();
+const activityDecoder = new TextDecoder();
+function appendActivity(line) {
+  let bytes = activityEncoder.encode(line);
+  if (bytes.length > activityByteLimit) {
+    let start = bytes.length - activityByteLimit;
+    while ((bytes[start] & 0xc0) === 0x80) start++;
+    bytes = bytes.subarray(start);
+    line = activityDecoder.decode(bytes);
+  }
+  activity.push(line);
+  // Count the separator too; the final entry has no trailing newline.
+  activitySizes.push(bytes.length + 1);
+  activityBytes += bytes.length + 1;
+  while (activity.length > 1500 || activityBytes - 1 > activityByteLimit) {
+    activityBytes -= activitySizes.shift();
+    activity.shift();
+  }
+}
 function beginProgress(plan) {
   previousResult = null;
   activity = [];
+  activitySizes = [];
+  activityBytes = 0;
   progressStates = {};
   progressPackages = plan.packages;
   setUpdateMode('running');
@@ -320,8 +344,7 @@ window.receiveUpdate = function (event) {
     case 'activity': {
       if (event.packages) progressPackages = event.packages;
       progressStates = event.states;
-      activity.push(event.line);
-      if (activity.length > 1500) activity.splice(0, activity.length - 1500);
+      appendActivity(event.line);
       const log = $('activity-log');
       if (log) {
         const bottom = log.scrollHeight - log.scrollTop - log.clientHeight < 30;

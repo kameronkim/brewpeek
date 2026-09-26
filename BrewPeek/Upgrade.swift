@@ -66,6 +66,23 @@ final class UpgradePreparation {
   }
 }
 
+/// Keep recent activity in a byte-bounded buffer without splitting a UTF-8 scalar.
+private struct UpdateLogBuffer {
+  private static let byteLimit = 1_000_000
+  private var bytes = Data()
+  var isEmpty: Bool { bytes.isEmpty }
+  var text: String { String(decoding: bytes, as: UTF8.self) }
+
+  mutating func append(_ text: String) {
+    bytes.append(contentsOf: text.utf8)
+    if bytes.count > Self.byteLimit {
+      // Trim in batches to avoid copying the entire buffer for every new line.
+      bytes = Data(bytes.suffix(Self.byteLimit / 2).drop(while: { $0 & 0xc0 == 0x80 }))
+    }
+  }
+  mutating func removeAll() { bytes.removeAll(keepingCapacity: true) }
+}
+
 /// All commands run off the main thread. Arguments come from Homebrew metadata, never shell text.
 final class Upgrade {
   let inventory: Inventory
@@ -164,34 +181,38 @@ final class Upgrade {
     try task.run()
     // Read continuously, draining both streams together. Never timeout/kill an installation.
     var pending = Data()
-    var output = ""
+    var output = UpdateLogBuffer()
     while true {
       let chunk = pipe.fileHandleForReading.availableData
       if chunk.isEmpty { break }
       pending.append(chunk)
       if pending.count > 262_144 {
-        let line = String(decoding: pending, as: UTF8.self)
-        pending.removeAll()
-        output += line
+        var end = pending.index(pending.startIndex, offsetBy: 262_144)
+        while end > pending.startIndex && pending[end] & 0xc0 == 0x80 {
+          end = pending.index(before: end)
+        }
+        if end == pending.startIndex { end = pending.index(pending.startIndex, offsetBy: 262_144) }
+        let line = String(decoding: pending[..<end], as: UTF8.self)
+        pending.removeSubrange(..<end)
+        output.append(line)
         streaming?(line)
       }
       while let end = pending.firstIndex(of: 10) {
         let line = String(decoding: pending[..<end], as: UTF8.self).replacingOccurrences(
           of: "\r", with: "")
         pending.removeSubrange(...end)
-        output += line + "\n"
-        if output.utf8.count > 1_000_000 { output = String(output.suffix(500_000)) }
+        output.append(line + "\n")
         streaming?(line)
       }
     }
     if !pending.isEmpty {
       let line = String(decoding: pending, as: UTF8.self)
-      output += line
+      output.append(line)
       streaming?(line)
     }
     task.waitUntilExit()
     try? pipe.fileHandleForReading.close()
-    return (task.terminationStatus, output)
+    return (task.terminationStatus, output.text)
   }
   func json(_ arguments: [String], control: UpgradePreparation? = nil) throws -> Record {
     let text =
@@ -406,7 +427,7 @@ final class Upgrade {
     var items = plan.packages
     var states = Dictionary(uniqueKeysWithValues: items.map { ($0.id, "Waiting for Homebrew") })
     var touched = Set<String>()
-    var bufferedLines: [String] = []
+    var bufferedLines = UpdateLogBuffer()
     var lastEvent = Date.distantPast
     event(["kind": "progress", "packages": items.map(\.record), "states": states, "processed": 0])
     let result = try command(["upgrade", "--no-ask"] + plan.selected.map(\.argument)) { line in
@@ -464,10 +485,11 @@ final class Upgrade {
           touched.insert(p.id)
         }
       }
+      if !bufferedLines.isEmpty { bufferedLines.append("\n") }
       bufferedLines.append(line)
       if Date().timeIntervalSince(lastEvent) >= 0.1 {
         event([
-          "kind": "activity", "line": bufferedLines.joined(separator: "\n"),
+          "kind": "activity", "line": bufferedLines.text,
           "packages": items.map(\.record), "states": states,
           "processed": states.values.filter { $0 == "Awaiting verification" }.count,
         ])
@@ -477,7 +499,7 @@ final class Upgrade {
     }
     if !bufferedLines.isEmpty {
       event([
-        "kind": "activity", "line": bufferedLines.joined(separator: "\n"),
+        "kind": "activity", "line": bufferedLines.text,
         "packages": items.map(\.record), "states": states,
         "processed": states.values.filter { $0 == "Awaiting verification" }.count,
       ])
@@ -485,6 +507,9 @@ final class Upgrade {
     event(["kind": "verifying"])
     let after: [UpgradePackage]
     do { after = try installed() } catch {
+      var details = UpdateLogBuffer()
+      details.append(result.1)
+      details.append("\n" + error.localizedDescription)
       return [
         "kind": "result",
         "packages": items.map { p -> Record in
@@ -492,7 +517,7 @@ final class Upgrade {
           r["outcome"] = "attention"
           r["message"] = "Could not verify installed version"
           return r
-        }, "details": result.1 + "\n" + error.localizedDescription, "verified": false,
+        }, "details": details.text, "verified": false,
       ]
     }
     items = items.map { p in
