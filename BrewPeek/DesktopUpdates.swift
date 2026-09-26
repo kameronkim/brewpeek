@@ -138,9 +138,13 @@ extension DesktopApp {
           }
           // Keep results even if inventory collection fails after an otherwise completed upgrade.
           do {
-            let snapshot = try engine.inventory.collect(refreshMetadata: false)
+            let affected = Set(
+              (result["packages"] as? [Record] ?? []).compactMap { $0["id"] as? String })
+            let snapshot = try engine.inventory.collect(
+              refreshMetadata: false, previous: try? InventoryStore.load(destination),
+              invalidatingSizes: affected)
             try InventoryStore.save(snapshot, to: destination)
-            result["snapshot"] = snapshot
+            result["snapshot"] = InventoryStore.displaySnapshot(snapshot)
           } catch { result["refreshError"] = error.localizedDescription }
           result["retryKeys"] = fresh.selected.map(\.id)
           result["command"] =

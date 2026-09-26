@@ -22,6 +22,12 @@ enum InventoryStore {
   static func load(_ url: URL) throws -> [String: Any] {
     try decode(Data(contentsOf: url))
   }
+  /// Internal cache metadata stays native; the web view only receives display data.
+  static func displaySnapshot(_ value: Record) -> Record {
+    var snapshot = value
+    snapshot.removeValue(forKey: "sizeCache")
+    return snapshot
+  }
   static func migrateLegacy(to url: URL) throws {
     let legacy = url.deletingLastPathComponent().appendingPathComponent("homebrew-inventory.html")
     guard FileManager.default.fileExists(atPath: legacy.path) else { return }

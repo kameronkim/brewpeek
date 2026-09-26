@@ -202,7 +202,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   func loadReport() {
     guard pageReady, FileManager.default.fileExists(atPath: output.path) else { return }
     do {
-      let snapshot = try InventoryStore.load(output)
+      let snapshot = InventoryStore.displaySnapshot(try InventoryStore.load(output))
       web.isHidden = false
       web.callAsyncJavaScript(
         """

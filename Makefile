@@ -1,5 +1,5 @@
 APP := dist/BrewPeek.app
-SOURCES := $(addprefix BrewPeek/,Upgrade.swift DesktopUpdates.swift Desktop.swift DesktopRemoval.swift Inventory.swift InventoryStore.swift)
+SOURCES := $(addprefix BrewPeek/,Upgrade.swift DesktopUpdates.swift Desktop.swift DesktopRemoval.swift Inventory.swift InventorySizes.swift InventoryStore.swift)
 WEB_FILES := $(addprefix BrewPeek/Web/,index.html styles.css inventory.js inventory-ui.js updates.js)
 RESOURCES := BrewPeek/Resources
 
