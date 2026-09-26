@@ -79,20 +79,21 @@ extension DesktopApp {
   private func startUpdate(_ plan: UpgradePlan, requestID: String) {
     updateRequestID = requestID
     let running = NSWorkspace.shared.runningApplications
-    let active = plan.packages.filter { p in
-      p.type == "cask"
-        && p.apps.contains { name in
-          running.contains {
-            $0.bundleURL?.lastPathComponent == URL(fileURLWithPath: name).lastPathComponent
-          }
-        }
+    let active = running.compactMap { app -> String? in
+      guard let url = app.bundleURL,
+        plan.packages.contains(where: { p in
+          p.type == "cask"
+            && p.apps.contains { URL(fileURLWithPath: $0).lastPathComponent == url.lastPathComponent }
+        })
+      else { return nil }
+      return app.localizedName ?? url.deletingPathExtension().lastPathComponent
     }
     guard active.isEmpty else {
       updatePlan = nil
       sendUpdate([
-        "kind": "error",
+        "kind": "error", "runningApps": Array(Set(active)).sorted(),
         "message": "Close these apps before updating, then retry: "
-          + active.map(\.name).joined(separator: ", "), "requestID": requestID,
+          + active.joined(separator: ", "), "requestID": requestID,
       ])
       return
     }

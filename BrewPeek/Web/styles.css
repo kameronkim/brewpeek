@@ -1478,6 +1478,56 @@ html,
   font: 11px/1.7 var(--mono);
   color: var(--secondary);
 }
+#confirm[data-issue='running-apps'] {
+  width: min(560px, calc(100vw - 32px));
+}
+#confirm[data-issue='running-apps'] .confirm-heading {
+  padding-bottom: 20px;
+}
+#confirm[data-issue='running-apps'] #confirm-error {
+  padding-bottom: 22px;
+  min-height: 0;
+}
+.running-apps {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.running-apps li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 15px 16px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.running-apps strong {
+  font: 500 14px/1.5 var(--sans);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.running-apps li > span {
+  font: 10px/1.5 var(--mono);
+  color: var(--secondary);
+  flex: none;
+}
+#confirm[data-issue='running-apps'] .confirm-bottom {
+  padding-top: 16px;
+}
+#confirm[data-issue='running-apps'] .dialog-actions {
+  margin-top: 0;
+}
+@media (max-width: 620px) {
+  #confirm[data-issue='running-apps'] #confirm-error {
+    padding: 0 16px 18px;
+  }
+  .running-apps li {
+    padding: 13px 14px;
+  }
+}
 #confirm[data-state='checking'] .confirm-heading {
   padding-bottom: 28px;
 }

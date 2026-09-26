@@ -117,6 +117,7 @@ function checkChanges(keys, trigger = document.activeElement) {
   postUpdate({ action: 'prepare', keys, requestID: activeRequest });
 }
 function setConfirmState(mode) {
+  delete $('confirm').dataset.issue;
   $('confirm').dataset.state = mode;
   document.querySelector('.confirm-scroll').hidden = mode !== 'confirming';
   document.querySelector('.confirm-bottom > p').hidden = mode !== 'confirming';
@@ -135,13 +136,21 @@ function showChecking(message) {
   setConfirmState('checking');
   $('confirm-title').focus({ preventScroll: true });
 }
-function showCheckError(message) {
+function showCheckError(message, runningApps = []) {
   updatePlan = null;
   setUpdateMode('check-failed');
-  $('confirm-title').textContent = 'Could not check updates';
-  $('confirm-copy').textContent = 'Review the details and try again.';
-  $('confirm-error').innerHTML = `<pre>${esc(message)}</pre>`;
   setConfirmState('check-failed');
+  if (runningApps.length) {
+    $('confirm').dataset.issue = 'running-apps';
+    $('confirm-title').textContent = 'Close apps to continue';
+    $('confirm-copy').textContent = 'Quit the apps below, then retry the update.';
+    $('confirm-error').innerHTML =
+      `<ul class="running-apps" aria-label="Apps to close">${runningApps.map((name) => `<li><strong>${esc(name)}</strong><span>Running</span></li>`).join('')}</ul>`;
+  } else {
+    $('confirm-title').textContent = 'Could not check updates';
+    $('confirm-copy').textContent = 'Review the details and try again.';
+    $('confirm-error').innerHTML = `<pre>${esc(message)}</pre>`;
+  }
   $('retry-plan').focus({ preventScroll: true });
 }
 $('retry-plan').onclick = () => checkChanges(requestedKeys);
@@ -344,7 +353,7 @@ window.receiveUpdate = function (event) {
     }
     case 'error':
       if (['checking', 'confirming', 'check-failed'].includes(updateMode)) {
-        showCheckError(event.message);
+        showCheckError(event.message, event.runningApps);
         break;
       }
       updatePlan = null;
