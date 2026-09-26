@@ -2,7 +2,7 @@ import Cocoa
 import WebKit
 
 final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate,
-  NSMenuItemValidation, WKScriptMessageHandler
+  NSMenuItemValidation, WKScriptMessageHandler, NSWindowDelegate
 {
   var window: NSWindow!
   var web: WKWebView!
@@ -11,7 +11,14 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   let loadingSpinner = NSProgressIndicator()
   let loadingTitle = NSTextField(labelWithString: "Homebrew 정보를 불러오는 중입니다…")
   var hasDisplayedData = false
+  var inventoryRefreshState = "idle"
+  var collectingInventory: Inventory?
   var busy = false
+  var updateInProgress = false
+  var updateRequestID: String?
+  var updatePreparing = false
+  var preparationControl: UpgradePreparation?
+  var updatePlan: UpgradePlan?
   var output: URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("BrewPeek", isDirectory: true)
@@ -27,6 +34,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
       styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false
     )
     window.title = "BrewPeek"
+    window.delegate = self
     window.minSize = NSSize(width: 480, height: 520)
     window.appearance = NSAppearance(named: .darkAqua)
     window.isReleasedWhenClosed = false
@@ -34,7 +42,9 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     window.contentView = root
     let config = WKWebViewConfiguration()
     config.websiteDataStore = .nonPersistent()
+    config.preferences.tabFocusesLinks = true
     config.userContentController.add(self, name: "refreshInventory")
+    config.userContentController.add(self, name: "packageUpdate")
     web = WKWebView(frame: .zero, configuration: config)
     web.navigationDelegate = self
     web.uiDelegate = self
@@ -111,65 +121,96 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     let refresh = reportMenu.addItem(
       withTitle: "정보 새로고침", action: #selector(self.refresh), keyEquivalent: "r")
     refresh.target = self
+    let search = reportMenu.addItem(
+      withTitle: "패키지 검색", action: #selector(focusSearch), keyEquivalent: "f")
+    search.target = self
     NSApp.mainMenu = menu
   }
   func userContentController(
     _ userContentController: WKUserContentController, didReceive message: WKScriptMessage
   ) {
-    guard message.name == "refreshInventory", message.frameInfo.isMainFrame,
+    guard message.frameInfo.isMainFrame,
       message.frameInfo.request.url?.standardizedFileURL == page.standardizedFileURL
     else { return }
-    refresh()
+    if message.name == "packageUpdate" {
+      handleUpdate(message.body)
+    } else if message.name == "refreshInventory" {
+      refresh()
+    }
   }
   @objc func refresh() {
-    guard !busy else { return }
+    guard !busy, updatePlan == nil, updateRequestID == nil else { return }
     busy = true
+    inventoryRefreshState = "refreshing"
     refreshButton.isEnabled = false
     refreshButton.isHidden = true
-    web.isHidden = true
-    loading.isHidden = false
+    web.isHidden = !hasDisplayedData
+    loading.isHidden = hasDisplayedData
     loadingTitle.stringValue = "Homebrew 정보를 불러오는 중입니다…"
     loadingSpinner.startAnimation(nil)
+    sendRefreshState()
     if !pageReady {
       web.loadFileURL(page, allowingReadAccessTo: page.deletingLastPathComponent())
     }
     let destination = output
+    let inventory: Inventory
+    do {
+      inventory = Inventory(brew: try Inventory.locateBrew())
+      collectingInventory = inventory
+    } catch {
+      finishRefresh(error: error)
+      return
+    }
     DispatchQueue.global(qos: .userInitiated).async {
       do {
-        try Inventory(brew: Inventory.locateBrew()).generate(output: destination)
+        try inventory.generate(output: destination)
         try InventoryStore.migrateLegacy(to: destination)
         DispatchQueue.main.async {
-          self.busy = false
-          self.refreshButton.isEnabled = true
-          self.loadReport()
+          self.finishRefresh()
         }
       } catch {
         DispatchQueue.main.async {
-          self.busy = false
-          self.refreshButton.isEnabled = true
-          self.showLoadingFailure(useSavedData: true)
-          self.showError(error.localizedDescription)
+          self.finishRefresh(error: error)
         }
       }
     }
+  }
+  func finishRefresh(error: Error? = nil) {
+    collectingInventory = nil
+    busy = false
+    inventoryRefreshState = error == nil ? "idle" : "failed"
+    refreshButton.isEnabled = true
+    if let error {
+      showLoadingFailure(useSavedData: true)
+      sendRefreshState()
+      showError(error.localizedDescription)
+    } else {
+      loadReport()
+    }
+  }
+  func sendRefreshState() {
+    guard pageReady else { return }
+    web.callAsyncJavaScript(
+      "window.setRefreshState(state)",
+      arguments: ["state": inventoryRefreshState], in: nil, in: .page
+    ) { _ in }
+  }
+  @objc func focusSearch() {
+    guard hasDisplayedData else { return }
+    web.evaluateJavaScript("window.focusPackageSearch()", completionHandler: nil)
   }
   func loadReport() {
     guard pageReady, FileManager.default.fileExists(atPath: output.path) else { return }
     do {
       let snapshot = try InventoryStore.load(output)
-      // Rebuild the sticky layer after layout changes while returning from the loading view.
       web.isHidden = false
       web.callAsyncJavaScript(
         """
-        const toolbar = document.querySelector('.toolbar');
-        toolbar.style.position = 'relative';
         window.setInventory(snapshot);
-        await new Promise(requestAnimationFrame);
-        await new Promise(requestAnimationFrame);
-        toolbar.style.removeProperty('position');
+        window.setRefreshState(refreshState);
         return true;
         """,
-        arguments: ["snapshot": snapshot], in: nil,
+        arguments: ["snapshot": snapshot, "refreshState": inventoryRefreshState], in: nil,
         in: .page
       ) { result in
         if case .failure(let error) = result {
@@ -183,6 +224,8 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
         }
       }
     } catch {
+      // A corrupt saved snapshot must not interrupt the fresh collection.
+      if inventoryRefreshState == "refreshing" { return }
       showLoadingFailure()
       showError(error.localizedDescription)
     }
@@ -203,16 +246,18 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   }
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
     pageReady = true
-    if !busy { loadReport() }
+    loadReport()
+    sendRefreshState()
   }
   func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+    if menuItem.action == #selector(focusSearch) { return hasDisplayedData }
     if menuItem.action == #selector(removeApp) || menuItem.action == #selector(refresh) {
-      return !busy
+      return !busy && updatePlan == nil && updateRequestID == nil
     }
     return true
   }
   @objc func removeApp() {
-    guard !busy else { return }
+    guard !busy, updatePlan == nil, updateRequestID == nil else { return }
     busy = true
     refreshButton.isEnabled = false
     let app = Bundle.main.bundleURL
@@ -231,6 +276,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
       }
       do {
         try DesktopRemoval.remove(app: app, reports: reports)
+        self.busy = false
         NSApp.terminate(nil)
       } catch {
         self.busy = false
@@ -287,6 +333,10 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     }
   }
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+  func applicationWillTerminate(_ notification: Notification) {
+    collectingInventory?.cancel()
+    preparationControl?.cancel()
+  }
 }
 @main
 struct DesktopMain {

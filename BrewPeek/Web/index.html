@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>BrewPeek — Installed packages</title>
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="16x16"
+      href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAEKADAAQAAAABAAAAEAAAAAAXnVPIAAABVklEQVQ4EWPk5OSUY2ZmncvA8N+OkZGRjYEI8P///18MDIyH/v79nczIw8O3m5GRwYUIfRhK/v9n2AM0gPcnyOb7929hKFBUVMMQAwnsPjOdwdUkkwHkEkZeXr7/WFURKchEpDqcylhgMhwcHDAmVlpKSoLh2bMXcLkfP36A2SguMDc3gyvAxsjISGIAYWQADwN1dTWGjRvXMuzZs4+hrq6R4du3b8jqGHC5gJmdnb0BpPLr168ML168YsjMTGPQ0FBn2LJlG4oBvLw8DJ8/f4GL/fnzB8yGh4G8vBxDQ0MNw9at28EuyM7OACs4deo0w+nTZ8HszUf6wbSvTSGYBhFwAx4+fMSQnp7NcPLkKbgkOgNZI0wOHgbkxgLcAJiJpNIs4OQITMrBwf5Y9a5duxEujqwGJA7WS2lmYmZmZjrIyMisC8zOMsBMxQy3Dg8Dmp33g7IzAPejfZpRAfQOAAAAAElFTkSuQmCC"
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="32x32"
+      href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAAXNSR0IArs4c6QAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAIKADAAQAAAABAAAAIAAAAACPTkDJAAACTklEQVRYCWNkgAJeXl5bILP0/38GE0ZGRkmYODXp////P2dkZDgDNLP78+fPh0FmM4MIoOVVQIsXAy1WB2JekBgtAMRsRnWgXfHs7Ox/fv36dZgR5HOgwAGgJBMtLMVlJjA0/gFDw4EZ6JIpQMs1cCmklTjQTkag2SIskDhHWHP//i0EBw9LUVENjyym1O4z08GCriaZcEmQ3UxAh9AkwcFtwcMA2Q1MA3z/8aihuRRdEx4234w6gAU9WDg4ONCFSOKbmhoynD59HqeeHz9+oMgNeBRghACK8yjgZGQkoeieMWMeCh/GwRkCjY11DHFxMTB1NKOxhkBAgD9DWFgI2FJTUxOGqqpaBmDtRZIjcPkY3RCsIXDnzh2Gp0+fgtW6uDgxrF+/ikFXVwddL1X4WB1w5cpVhsDAMIY9e/aBLZGWlmZYsmQhQ2xsNFUsRTYEqwOQFcDYoLoLUoHBRKhDY00DoODu7+9mAPkcBEDRUVBQwgAKGWLB5iP9KEp9bQpR+DAOVgcoKyvDLQdFA3IivH79EkwvnNbU1IOzSWVgdcCGDRsZDA31Ge7evcewaNESUs0Eq8flY3TDMKrjEVcUE50L0IOOWnyMKKCWwcSaM+AhgJELzM1NiHU8WN3Jk6CODibAZQ66emCzHNRdQrSMLS3NME3DI4JuIEwpLnOQ1YPtBvaMNgELWV+YRvrS/zcPfNcM2EF8xMbG9hfocwdgVIC6SzQH0H5hLbCNsRTcOwb1UoF9xP1Am0WA3SU+oDto0kOGpDdQR5ghDWQ5yKcAFamyPHSDiNoAAAAASUVORK5CYII="
+    />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="64x64"
+      href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAAXNSR0IArs4c6QAAADhlWElmTU0AKgAAAAgAAYdpAAQAAAABAAAAGgAAAAAAAqACAAQAAAABAAAAQKADAAQAAAABAAAAQAAAAABlmWCKAAAEIElEQVR4Ae1bX0hTURj/7pxNalMohdQnEwJfknL+AXvtMZySBT1K1NQXAyUpGLEokwlJoa4EfaqHCl3Wm/SWoSmEvRjB8m0EaUgbTlR2+77bJnf33m33jjnvvWcXxu75znfOPb/f+X3nnN3xcaB8FdvtdheAxcVxvBOAq0I3u7Krbq0RAD7E89wKQCwQiUQCONI96Wg5qcHhcLQjYB/aa6V1Bi8HkZCBcDg8K8ZRJCpYEPwwgn+KtpMiu1luERN3zWY7dmJ3d/cjguIJ2AEBcfADZkGbGgfXiiQcRxLmyUcIgbjsZ1I3MmMN30HhQAQUOxyla/httpjPNGvBcPhvHYerfSfHWV5n8jZjPc/HrlpoqzMjOHWYLC5rfJ9P6b++/iNlXTYVNTVns2mmus38ykSS7yVnd1JZXCDsqADhkCO2M3TPVSEBhjvh5XKC7EQA0xeHW6BwImKVBeYVUCCAVekncBcUkGCC1e+CAlid+QRua+Im1XdJSUmqqrzYGxvPC89ZXv6a1fN2dnbStiuEQFp6GKhkXgEZ1wC9icDt7ko7JL9/Km29tJJ5BWgmgHaF6elJaG5ukpJpyLJmAjyee9DS0gxTUy+gt7cbOE7255KhiMj4PkB8DnC52mBo6EESwMXFJRgYGISNjc0ke64KujkH1NaeAY/nrgwXqWF29q1hQ0J1CGxtbcHq6jcZAWQoLz9l2JAostls9xVRxY1W6/+dMhqNwtzcB+DxBZrT2SCLfVoLmpoaoaHhAiwsfIbt7Wi6blXXVVdXCr6h0C/VbcSO+/v74qLsXrUCqCWP6MfGJqCr6yb8/r0h64wMFBIzM28MExKaCEggXlr6Ah0dnUALoNJVUVEeDwm3TClK/kdpy4oA9QPW/xaZ1VGYDkEjI8PC4qdEBm2J/f13gJSi90sTAbTQ9fS48XMLLBZl8VBYEPjNzT+Hgv39pydp+7188XbaemmlagJoq/P5HguLnLQTKsdiMRgff44fv7BYKvno0aaagLKyMqivP6eIgXYEOg0qSX5tTfnsIO2ork65b6lfrsvKOlZ4SjD4E7zeR7Iaknx7+xVF8DJnHRpUK4DGHgi8w8OOEwG3HZnktcZ4Js41EUCdeb0PobLyNPj9k4addTEpmn4Nihvm6143vwbzBTjfz1G9COZ7YPl6XoGAfDGt1+cwr4CMu4BeZy5X42JeAQUCciUlo/bDvAIy/hbo6+s51MkdHR3X1L/W8WTqnxSA2VXMXhEkgA8xCx+xY8ZI6Ut81XedRRLwb45XqIAYJRQyesUCzCdN0SKI6aQ8A/mCUpELmPeExElMIvxOGZWYPtMqdTNnmfdhzuAzwiYQQDeUTkoZleYnQQA/iJCTU2fJQOmkSAK+yOcwY9x0+cOUPH0jPvMHWTKp/r1kJn3+H7GhL0uodoICAAAAAElFTkSuQmCC"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="mast"><div class="brand">BREWPEEK</div></div>
+        <div class="heading">
+          <h1>Installed packages.<br /><span>At a glance.</span></h1>
+        </div>
+      </header>
+      <section class="overview" aria-label="Installation overview" id="overview"></section>
+      <p class="note" id="overview-note"></p>
+      <div class="toolbar">
+        <div class="search-line">
+          <label class="searchbox"
+            ><span class="search-symbol" aria-hidden="true">⌕</span
+            ><span class="sr-only">Search packages</span
+            ><input
+              id="search"
+              type="search"
+              aria-label="Search packages"
+              autocomplete="off"
+              placeholder="Search packages..." /></label
+          ><label class="sr-only" for="category">Category</label
+          ><select id="category">
+            <option value="all">All categories</option>
+          </select>
+        </div>
+        <div class="filter-line">
+          <div class="segments" role="group" aria-label="Package filters">
+            <button data-filter="all" aria-pressed="true">All</button
+            ><button id="updates-filter" data-filter="updates" aria-pressed="false" hidden>
+              Updates</button
+            ><button data-filter="formula" aria-pressed="false">Formula</button
+            ><button data-filter="cask" aria-pressed="false">Cask</button
+            ><button data-filter="leaf" aria-pressed="false">Leaf</button
+            ><button data-filter="dependency" aria-pressed="false">Dependency</button
+            ><button data-filter="direct" aria-pressed="false">Direct</button>
+          </div>
+          <div class="filter-actions">
+            <span id="results" role="status" aria-live="polite"></span
+            ><button id="refresh" type="button" title="Refresh (⌘R)" aria-label="Refresh">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M20 4v6h-6M20 10a8 8 0 1 0-2 8" /></svg
+              ><span>Refresh</span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div id="operation" aria-live="polite"></div>
+      <div id="packages"></div>
+      <section class="section environment-panel" id="environment">
+        <h2>Environment</h2>
+        <dl class="env" id="env"></dl>
+        <div class="environment-taps">
+          <h3>Additional taps <span class="count" id="tap-count"></span></h3>
+          <div id="taps-list"></div>
+        </div>
+      </section>
+      <footer>
+        <a
+          id="project-link"
+          href="https://github.com/kameronkim/brewpeek"
+          aria-label="BrewPeek GitHub repository"
+          ><span>GitHub</span
+          ><svg
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.75"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 12 12 4M4 4h8v8" /></svg></a
+        ><span id="footer-updated"></span>
+      </footer>
+      <noscript><p>Enable JavaScript to view installed packages.</p></noscript>
+    </main>
+    <script src="inventory.js"></script>
+    <dialog id="confirm" aria-labelledby="confirm-title" aria-describedby="confirm-copy">
+      <div class="confirm-heading">
+        <div class="eyebrow">PACKAGE UPDATE</div>
+        <h2 id="confirm-title" tabindex="-1" autofocus></h2>
+        <p id="confirm-copy"></p>
+      </div>
+      <div id="confirm-error" hidden></div>
+      <div class="confirm-scroll" aria-label="Packages to update">
+        <table class="confirm-table">
+          <colgroup>
+            <col style="width: 26%" />
+            <col style="width: 37%" />
+            <col style="width: 37%" />
+          </colgroup>
+          <thead>
+            <tr>
+              <th scope="col">Name</th>
+              <th scope="col">Current</th>
+              <th scope="col">New</th>
+            </tr>
+          </thead>
+          <tbody id="confirm-list"></tbody>
+        </table>
+      </div>
+      <div class="confirm-bottom">
+        <p>Homebrew may also update related packages.</p>
+        <div class="dialog-actions">
+          <button class="subtle-btn" id="cancel">Cancel</button
+          ><button class="subtle-btn" id="retry-plan" hidden>Retry</button
+          ><button class="update-btn bulk" id="start">Update</button>
+        </div>
+      </div>
+    </dialog>
+    <dialog id="notice" aria-labelledby="notice-title">
+      <div class="eyebrow">BREWPEEK</div>
+      <h2 id="notice-title"></h2>
+      <p id="notice-copy"></p>
+      <pre id="notice-command" hidden></pre>
+      <div class="dialog-actions"><button class="subtle-btn" id="notice-ok">OK</button></div>
+    </dialog>
+    <script src="inventory-ui.js"></script>
+    <script src="updates.js"></script>
+  </body>
+</html>
