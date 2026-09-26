@@ -158,7 +158,7 @@ function showPlan(plan, changed) {
   $('confirm-list').innerHTML = plan.packages
     .map(
       (p) =>
-        `<tr><td>${esc(p.name)}<small class="dependency-note">${esc(p.reason)}</small></td><td>${p.action === 'install' ? 'Not installed' : esc(p.version)}</td><td>${esc(p.availableVersion)}</td></tr>`
+        `<tr><td>${esc(p.name)}<small class="dependency-note">${esc(p.relationship || p.reason)}</small></td><td>${p.action === 'install' ? 'Not installed' : esc(p.version)}</td><td>${esc(p.availableVersion)}</td></tr>`
     )
     .join('');
   document.querySelector('.confirm-scroll').scrollTop = 0;
@@ -234,9 +234,10 @@ function paintProgress(processed = processedPackages) {
       row = document.createElement('div');
       row.className = 'download-item';
       row.dataset.package = p.id;
-      row.innerHTML = `<span>${esc(p.name)}<small class="dependency-note">${esc(p.reason)}</small></span><div class="progress-track"><div class="progress-fill"></div></div><span class="download-state"></span>`;
+      row.innerHTML = `<span>${esc(p.name)}<small class="dependency-note">${esc(p.relationship || p.reason)}</small></span><div class="progress-track"><div class="progress-fill"></div></div><span class="download-state"></span>`;
       container.append(row);
     }
+    row.querySelector('.dependency-note').textContent = p.relationship || p.reason;
     const text =
       updateMode === 'verifying'
         ? 'Verifying installed version…'

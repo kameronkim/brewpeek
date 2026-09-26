@@ -10,6 +10,8 @@ struct UpgradePackage {
   let receipt: String
   let apps: [String]
   var reason: String
+  var dependencies: [String] = []
+  var relationship: String = ""
   var id: String { type + ":" + fullName }
   var argument: String {
     fullName.contains("/")
@@ -19,6 +21,7 @@ struct UpgradePackage {
     [
       "id": id, "name": name, "type": type, "version": current.joined(separator: ", "),
       "availableVersion": next, "action": current.isEmpty ? "install" : "update", "reason": reason,
+      "relationship": relationship,
     ]
   }
 }
@@ -207,13 +210,21 @@ final class Upgrade {
       let installed = f["installed"] as? [Record] ?? []
       let revision = f["revision"] as? Int ?? 0
       let stable = (f["versions"] as? Record)?["stable"] as? String ?? ""
+      let dependencies =
+        f["dependencies"] as? [String]
+        ?? installed.flatMap {
+          ($0["runtime_dependencies"] as? [Record] ?? []).filter {
+            $0["declared_directly"] as? Bool == true
+          }.compactMap { $0["full_name"] as? String }
+        }
       result.append(
         UpgradePackage(
           name: name, fullName: full, type: "formula",
           current: installed.compactMap { $0["version"] as? String },
           next: stable + (revision > 0 ? "_\(revision)" : ""),
           receipt: installed.map { String(describing: $0["time"] ?? "") }.joined(separator: ","),
-          apps: [], reason: "Dependency"))
+          apps: [], reason: "Dependency",
+          dependencies: dependencies.map { relationshipID($0, type: "formula") }))
     }
     for c in info["casks"] as? [Record] ?? [] {
       guard let name = c["token"] as? String else { continue }
@@ -222,13 +233,55 @@ final class Upgrade {
       let apps = (c["artifacts"] as? [Record] ?? []).compactMap {
         ($0["app"] as? [Any])?.first as? String
       }
+      let dependencies = c["depends_on"] as? Record ?? [:]
+      let dependencyIDs = ["formula", "cask"].flatMap { type in
+        (dependencies[type] as? [String] ?? []).map { relationshipID($0, type: type) }
+      }
       result.append(
         UpgradePackage(
           name: name, fullName: full, type: "cask", current: versions,
           next: c["version"] as? String ?? "",
-          receipt: String(describing: c["installed_time"] ?? ""), apps: apps, reason: "Dependency"))
+          receipt: String(describing: c["installed_time"] ?? ""), apps: apps, reason: "Dependency",
+          dependencies: dependencyIDs))
     }
     return result
+  }
+  private static func relationshipID(_ name: String, type: String) -> String {
+    let prefix = type == "cask" ? "homebrew/cask/" : "homebrew/core/"
+    return type + ":" + (name.hasPrefix(prefix) ? String(name.dropFirst(prefix.count)) : name)
+  }
+  /// Explain only known, direct edges between packages Homebrew already put in the plan.
+  /// Keep origin (Selected / Detected during execution) separate from the display explanation.
+  static func explainRelationships(_ packages: [UpgradePackage]) -> [UpgradePackage] {
+    func id(_ package: UpgradePackage) -> String {
+      relationshipID(package.fullName, type: package.type)
+    }
+    func names(_ related: [UpgradePackage]) -> String {
+      related.map { package in
+        packages.contains { $0.fullName == package.fullName && $0.type != package.type }
+          ? package.fullName + " (" + package.type + ")" : package.fullName
+      }.sorted().joined(separator: ", ")
+    }
+    return packages.map { package in
+      var package = package
+      guard package.reason != "Selected" else { return package }
+      let parents = packages.filter { $0.id != package.id && $0.dependencies.contains(id(package)) }
+      let dependencies = packages.filter {
+        $0.id != package.id && package.dependencies.contains(id($0))
+      }
+      let selectedParents = parents.filter { $0.reason == "Selected" }
+      let selectedDependencies = dependencies.filter { $0.reason == "Selected" }
+      if !selectedParents.isEmpty {
+        package.relationship = "Required by " + names(selectedParents)
+      } else if !selectedDependencies.isEmpty {
+        package.relationship = "Uses " + names(selectedDependencies)
+      } else if !parents.isEmpty {
+        package.relationship = "Required by " + names(parents)
+      } else if !dependencies.isEmpty {
+        package.relationship = "Uses " + names(dependencies)
+      }
+      return package
+    }
   }
   func installed(control: UpgradePreparation? = nil) throws -> [UpgradePackage] {
     Self.packages(try json(["info", "--json=v2", "--installed"], control: control))
@@ -344,7 +397,7 @@ final class Upgrade {
           + output)
     }
     return UpgradePlan(
-      selected: actionable, packages: packages, output: output,
+      selected: actionable, packages: Self.explainRelationships(packages), output: output,
       excluded: selected.filter { p in !actionable.contains(where: { $0.id == p.id }) }.map(\.name))
   }
 
@@ -360,22 +413,40 @@ final class Upgrade {
       if let range = line.range(
         of: #"Installing (?:.* dependency: |dependencies for [^:]+: )"#, options: .regularExpression
       ) {
-        for candidate in line[range.upperBound...].components(separatedBy: ", ") {
-          let name = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-          if Self.validName(name),
-            !items.contains(where: { $0.name == name || $0.fullName == name })
-          {
+        let names = line[range.upperBound...].components(separatedBy: ", ").map {
+          $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter(Self.validName)
+        for name in names {
+          if !items.contains(where: { $0.name == name || $0.fullName == name }) {
             let old = before.first(where: {
               $0.type == "formula" && ($0.name == name || $0.fullName == name)
             })
             let item = UpgradePackage(
               name: name, fullName: old?.fullName ?? name, type: "formula",
               current: old?.current ?? [], next: "", receipt: old?.receipt ?? "", apps: [],
-              reason: "Detected during execution")
+              reason: "Detected during execution", dependencies: old?.dependencies ?? [])
             items.append(item)
             states[item.id] = "Waiting for Homebrew"
           }
         }
+        // Homebrew can reveal a new dependency before JSON metadata includes it.
+        let heading = String(line[range])
+        let parentName =
+          heading.hasPrefix("Installing dependencies for ")
+          ? String(heading.dropFirst("Installing dependencies for ".count).dropLast(2))
+          : String(heading.dropFirst("Installing ".count).dropLast(" dependency: ".count))
+        let parents = items.indices.filter {
+          items[$0].fullName == parentName || items[$0].name == parentName
+        }
+        if parents.count == 1, let parent = parents.first {
+          for name in names {
+            let dependency = Self.relationshipID(name, type: "formula")
+            if !items[parent].dependencies.contains(dependency) {
+              items[parent].dependencies.append(dependency)
+            }
+          }
+        }
+        items = Self.explainRelationships(items)
       }
       // Output is activity, not proof of success. Percentages are intentionally not inferred.
       for p in items
@@ -430,7 +501,8 @@ final class Upgrade {
       guard matches.count == 1, let actual = matches.first else { return p }
       return UpgradePackage(
         name: actual.name, fullName: actual.fullName, type: actual.type, current: p.current,
-        next: actual.current.last ?? "", receipt: p.receipt, apps: actual.apps, reason: p.reason)
+        next: actual.current.last ?? "", receipt: p.receipt, apps: actual.apps, reason: p.reason,
+        dependencies: actual.dependencies, relationship: p.relationship)
     }
     var identities = Set<String>()
     items = items.filter { identities.insert($0.id).inserted }
@@ -441,9 +513,10 @@ final class Upgrade {
           UpgradePackage(
             name: p.name, fullName: p.fullName, type: p.type, current: old?.current ?? [],
             next: p.current.last ?? p.next, receipt: old?.receipt ?? "", apps: p.apps,
-            reason: "Detected during execution"))
+            reason: "Detected during execution", dependencies: p.dependencies))
       }
     }
+    items = Self.explainRelationships(items)
     let records: [Record] = items.map { p in
       var r = p.record
       let actual = after.first { $0.id == p.id }
