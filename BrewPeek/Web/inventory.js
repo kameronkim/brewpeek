@@ -15,6 +15,8 @@ const state = {
   expanded: new Set()
 };
 let allPackages = [];
+let packageSearch = new Map();
+let sortedPackages = null;
 const $ = (id) => document.getElementById(id);
 const esc = (value) =>
   String(value ?? '—').replace(
@@ -61,11 +63,9 @@ function highlighted(value) {
   }
   return result + esc(text.slice(offset));
 }
-function matches(p) {
-  const q = state.query.trim().toLowerCase();
-  const search = [p.name, p.displayName, p.description, p.category, p.tap].join(' ').toLowerCase();
+function matches(p, query) {
   return (
-    (!q || search.includes(q)) &&
+    (!query || packageSearch.get(p).includes(query)) &&
     (state.category === 'all' || p.category === state.category) &&
     (state.filter === 'all' ||
       (state.filter === 'updates' && Boolean(p.availableVersion)) ||
@@ -134,7 +134,19 @@ function section(type, items) {
   return `<section class="section" id="${type}"><table class="package-table ${type}" aria-label="${title}"><colgroup>${(type === 'formula' ? [54, 26, 20] : [54, 46]).map((width) => `<col style="width:${width}%">`).join('')}</colgroup><thead><tr class="section-heading-row"><th colspan="${type === 'formula' ? 3 : 2}"><div class="section-title"><h2>${title}</h2><span class="count">${countLabel(items.length, total)}</span></div></th></tr><tr class="sort-heading-row">${(type === 'formula' ? ['name', 'version', 'status'] : ['name', 'version']).map((col) => `<th scope="col" aria-sort="${state.sort === col ? (state.direction === 'asc' ? 'ascending' : 'descending') : 'none'}"><button data-sort="${col}">${col.toUpperCase()} ${state.sort === col ? (state.direction === 'asc' ? '↑' : '↓') : '↕'}</button></th>`).join('')}</tr></thead><tbody>${items.map(row).join('')}</tbody></table>${items.length ? '' : '<p class="empty">No matching packages.</p>'}</section>`;
 }
 function render() {
-  const filtered = allPackages.filter(matches).sort(compare);
+  if (
+    !sortedPackages ||
+    sortedPackages.sort !== state.sort ||
+    sortedPackages.direction !== state.direction
+  ) {
+    sortedPackages = {
+      sort: state.sort,
+      direction: state.direction,
+      items: [...allPackages].sort(compare)
+    };
+  }
+  const query = state.query.trim().toLowerCase();
+  const filtered = sortedPackages.items.filter((p) => matches(p, query));
   const visibleTypes =
     state.filter === 'cask'
       ? ['cask']
@@ -235,6 +247,14 @@ $('packages').addEventListener('click', (event) => {
 window.setInventory = function (data) {
   brewData = data;
   allPackages = [...data.formulae, ...data.casks];
+  // Snapshot replacement also invalidates cached metadata and package order.
+  packageSearch = new Map(
+    allPackages.map((p) => [
+      p,
+      [p.name, p.displayName, p.description, p.category, p.tap].join(' ').toLowerCase()
+    ])
+  );
+  sortedPackages = null;
   const updates = $('updates-filter');
   const updateCount = allPackages.filter((p) => Boolean(p.availableVersion)).length;
   updates.hidden = updateCount === 0;
