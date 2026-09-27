@@ -431,9 +431,23 @@ final class Upgrade {
     var lastEvent = Date.distantPast
     event(["kind": "progress", "packages": items.map(\.record), "states": states, "processed": 0])
     let result = try command(["upgrade", "--no-ask"] + plan.selected.map(\.argument)) { line in
-      if let range = line.range(
-        of: #"Installing (?:.* dependency: |dependencies for [^:]+: )"#, options: .regularExpression
-      ) {
+      let installing = line.contains("Installing")
+      let phase: String?
+      if installing || line.contains("Upgrading") || line.contains("Pouring") {
+        phase = "Installing…"
+      } else if line.contains("Downloading") || line.contains("Fetching") {
+        phase = "Downloading…"
+      } else if line.contains("successfully") || line.contains("🍺") {
+        phase = "Awaiting verification"
+      } else {
+        phase = nil
+      }
+      if installing,
+        let range = line.range(
+          of: #"Installing (?:.* dependency: |dependencies for [^:]+: )"#,
+          options: .regularExpression
+        )
+      {
         let names = line[range.upperBound...].components(separatedBy: ", ").map {
           $0.trimmingCharacters(in: .whitespacesAndNewlines)
         }.filter(Self.validName)
@@ -470,19 +484,14 @@ final class Upgrade {
         items = Self.explainRelationships(items)
       }
       // Output is activity, not proof of success. Percentages are intentionally not inferred.
-      for p in items
-      where line.range(
-        of: "(?<![A-Za-z0-9@+_.-])" + NSRegularExpression.escapedPattern(for: p.name)
-          + "(?![A-Za-z0-9@+_.-])", options: .regularExpression) != nil
-      {
-        if line.contains("Installing") || line.contains("Upgrading") || line.contains("Pouring") {
-          states[p.id] = "Installing…"
-          touched.insert(p.id)
-        } else if line.contains("Downloading") || line.contains("Fetching") {
-          states[p.id] = "Downloading…"
-        } else if line.contains("successfully") || line.contains("🍺") {
-          states[p.id] = "Awaiting verification"
-          touched.insert(p.id)
+      if let phase {
+        for p in items
+        where line.range(
+          of: "(?<![A-Za-z0-9@+_.-])" + NSRegularExpression.escapedPattern(for: p.name)
+            + "(?![A-Za-z0-9@+_.-])", options: .regularExpression) != nil
+        {
+          states[p.id] = phase
+          if phase != "Downloading…" { touched.insert(p.id) }
         }
       }
       if !bufferedLines.isEmpty { bufferedLines.append("\n") }
