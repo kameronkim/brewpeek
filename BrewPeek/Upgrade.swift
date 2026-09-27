@@ -426,10 +426,27 @@ final class Upgrade {
     let before = try installed()
     var items = plan.packages
     var states = Dictionary(uniqueKeysWithValues: items.map { ($0.id, "Waiting for Homebrew") })
+    var sentStates = states
+    var packagesChanged = false
     var touched = Set<String>()
     var bufferedLines = UpdateLogBuffer()
     var lastEvent = Date.distantPast
     event(["kind": "progress", "packages": items.map(\.record), "states": states, "processed": 0])
+    func flushActivity() {
+      var update: Record = ["kind": "activity", "line": bufferedLines.text]
+      if packagesChanged {
+        update["packages"] = items.map(\.record)
+        packagesChanged = false
+      }
+      if states != sentStates {
+        update["states"] = states
+        update["processed"] = states.values.filter { $0 == "Awaiting verification" }.count
+        sentStates = states
+      }
+      event(update)
+      bufferedLines.removeAll()
+      lastEvent = Date()
+    }
     let result = try command(["upgrade", "--no-ask"] + plan.selected.map(\.argument)) { line in
       let installing = line.contains("Installing")
       let phase: String?
@@ -461,6 +478,7 @@ final class Upgrade {
               current: old?.current ?? [], next: "", receipt: old?.receipt ?? "", apps: [],
               reason: "Detected during execution", dependencies: old?.dependencies ?? [])
             items.append(item)
+            packagesChanged = true
             states[item.id] = "Waiting for Homebrew"
           }
         }
@@ -478,6 +496,7 @@ final class Upgrade {
             let dependency = Self.relationshipID(name, type: "formula")
             if !items[parent].dependencies.contains(dependency) {
               items[parent].dependencies.append(dependency)
+              packagesChanged = true
             }
           }
         }
@@ -496,23 +515,9 @@ final class Upgrade {
       }
       if !bufferedLines.isEmpty { bufferedLines.append("\n") }
       bufferedLines.append(line)
-      if Date().timeIntervalSince(lastEvent) >= 0.1 {
-        event([
-          "kind": "activity", "line": bufferedLines.text,
-          "packages": items.map(\.record), "states": states,
-          "processed": states.values.filter { $0 == "Awaiting verification" }.count,
-        ])
-        bufferedLines.removeAll()
-        lastEvent = Date()
-      }
+      if Date().timeIntervalSince(lastEvent) >= 0.1 { flushActivity() }
     }
-    if !bufferedLines.isEmpty {
-      event([
-        "kind": "activity", "line": bufferedLines.text,
-        "packages": items.map(\.record), "states": states,
-        "processed": states.values.filter { $0 == "Awaiting verification" }.count,
-      ])
-    }
+    if !bufferedLines.isEmpty { flushActivity() }
     event(["kind": "verifying"])
     let after: [UpgradePackage]
     do { after = try installed() } catch {

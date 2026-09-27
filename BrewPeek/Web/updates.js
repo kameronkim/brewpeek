@@ -387,10 +387,11 @@ window.receiveUpdate = function (event) {
       break;
     case 'activity': {
       if (event.packages) progressPackages = event.packages;
-      progressStates = event.states;
+      if (event.states) progressStates = event.states;
       appendActivity(event.line);
       paintActivity();
-      paintProgress(event.processed);
+      if (event.packages || event.states || event.processed !== undefined)
+        paintProgress(event.processed);
       break;
     }
     case 'verifying':
