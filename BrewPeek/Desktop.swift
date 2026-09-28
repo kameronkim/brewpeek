@@ -24,6 +24,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
       .appendingPathComponent("BrewPeek", isDirectory: true)
       .appendingPathComponent("inventory.json")
   }
+  var reportLoadID: UUID?
   var pageReady = false
   var page: URL { Bundle.main.resourceURL!.appendingPathComponent("index.html") }
   func applicationDidFinishLaunching(_ notification: Notification) {
@@ -140,6 +141,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   }
   @objc func refresh() {
     guard !busy, updatePlan == nil, updateRequestID == nil else { return }
+    reportLoadID = nil
     busy = true
     inventoryRefreshState = "refreshing"
     refreshButton.isEnabled = false
@@ -200,34 +202,51 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     web.evaluateJavaScript("window.focusPackageSearch()", completionHandler: nil)
   }
   func loadReport() {
-    guard pageReady, FileManager.default.fileExists(atPath: output.path) else { return }
-    do {
-      let snapshot = InventoryStore.displaySnapshot(try InventoryStore.load(output))
-      web.isHidden = false
-      web.callAsyncJavaScript(
-        """
-        window.setInventory(snapshot);
-        window.setRefreshState(refreshState);
-        return true;
-        """,
-        arguments: ["snapshot": snapshot, "refreshState": inventoryRefreshState], in: nil,
-        in: .page
-      ) { result in
-        if case .failure(let error) = result {
+    guard pageReady else { return }
+    let requestID = UUID()
+    reportLoadID = requestID
+    let destination = output
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      let result = Result<Record?, Error> {
+        guard FileManager.default.fileExists(atPath: destination.path) else { return nil }
+        return InventoryStore.displaySnapshot(try InventoryStore.load(destination))
+      }
+      DispatchQueue.main.async { [weak self] in
+        guard let self, self.reportLoadID == requestID, self.pageReady else { return }
+        switch result {
+        case .success(let snapshot):
+          guard let snapshot else {
+            if self.inventoryRefreshState != "refreshing" { self.showLoadingFailure() }
+            return
+          }
+          self.web.isHidden = false
+          self.web.callAsyncJavaScript(
+            """
+            window.setInventory(snapshot);
+            window.setRefreshState(refreshState);
+            return true;
+            """,
+            arguments: ["snapshot": snapshot, "refreshState": self.inventoryRefreshState], in: nil,
+            in: .page
+          ) { [weak self] result in
+            guard let self, self.reportLoadID == requestID, self.pageReady else { return }
+            if case .failure(let error) = result {
+              self.showLoadingFailure()
+              self.showError(error.localizedDescription)
+            } else {
+              self.hasDisplayedData = true
+              self.loadingSpinner.stopAnimation(nil)
+              self.loading.isHidden = true
+              self.web.isHidden = false
+            }
+          }
+        case .failure(let error):
+          // A corrupt saved snapshot must not interrupt the fresh collection.
+          if self.inventoryRefreshState == "refreshing" { return }
           self.showLoadingFailure()
           self.showError(error.localizedDescription)
-        } else {
-          self.hasDisplayedData = true
-          self.loadingSpinner.stopAnimation(nil)
-          self.loading.isHidden = true
-          self.web.isHidden = false
         }
       }
-    } catch {
-      // A corrupt saved snapshot must not interrupt the fresh collection.
-      if inventoryRefreshState == "refreshing" { return }
-      showLoadingFailure()
-      showError(error.localizedDescription)
     }
   }
   func showLoadingFailure(useSavedData: Bool = false) {
@@ -316,6 +335,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     decisionHandler(.cancel)
   }
   func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+    reportLoadID = nil
     pageReady = false
     hasDisplayedData = false
     showLoadingFailure()
@@ -326,6 +346,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     withError error: Error
   ) {
     if (error as NSError).code != NSURLErrorCancelled {
+      reportLoadID = nil
       pageReady = false
       hasDisplayedData = false
       showLoadingFailure()
@@ -333,7 +354,12 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     }
   }
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+  func windowWillClose(_ notification: Notification) {
+    pageReady = false
+    reportLoadID = nil
+  }
   func applicationWillTerminate(_ notification: Notification) {
+    reportLoadID = nil
     collectingInventory?.cancel()
     preparationControl?.cancel()
   }

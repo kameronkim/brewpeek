@@ -46,6 +46,7 @@ extension DesktopApp {
   }
 
   private func prepareUpdate(keys: [String], requestID: String) {
+    reportLoadID = nil
     busy = true
     updatePreparing = true
     updateRequestID = requestID
