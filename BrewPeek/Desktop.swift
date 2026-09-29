@@ -6,10 +6,12 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
 {
   var window: NSWindow!
   var web: WKWebView!
-  let refreshButton = NSButton(title: "새로고침", target: nil, action: nil)
+  let refreshButton = NSButton(
+    title: NSLocalizedString("Refresh", comment: ""), target: nil, action: nil)
   let loading = NSStackView()
   let loadingSpinner = NSProgressIndicator()
-  let loadingTitle = NSTextField(labelWithString: "Homebrew 정보를 불러오는 중입니다…")
+  let loadingTitle = NSTextField(
+    labelWithString: NSLocalizedString("Loading Homebrew information…", comment: ""))
   var hasDisplayedData = false
   var inventoryRefreshState = "idle"
   var collectingInventory: Inventory?
@@ -102,28 +104,37 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     let appMenu = NSMenu()
     appItem.submenu = appMenu
     let remove = appMenu.addItem(
-      withTitle: "BrewPeek 제거…", action: #selector(removeApp), keyEquivalent: "")
+      withTitle: NSLocalizedString("Remove BrewPeek…", comment: ""), action: #selector(removeApp),
+      keyEquivalent: "")
     remove.target = self
     appMenu.addItem(.separator())
     appMenu.addItem(
-      withTitle: "BrewPeek 종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-    let editItem = NSMenuItem(title: "편집", action: nil, keyEquivalent: "")
+      withTitle: NSLocalizedString("Quit BrewPeek", comment: ""),
+      action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+    let editItem = NSMenuItem(
+      title: NSLocalizedString("Edit", comment: ""), action: nil, keyEquivalent: "")
     menu.addItem(editItem)
-    let edit = NSMenu(title: "편집")
+    let edit = NSMenu(title: NSLocalizedString("Edit", comment: ""))
     editItem.submenu = edit
     for (name, action, key) in [
-      ("실행 취소", "undo:", "z"), ("오려두기", "cut:", "x"), ("복사", "copy:", "c"), ("붙여넣기", "paste:", "v"),
-      ("전체 선택", "selectAll:", "a"),
+      (NSLocalizedString("Undo", comment: ""), "undo:", "z"),
+      (NSLocalizedString("Cut", comment: ""), "cut:", "x"),
+      (NSLocalizedString("Copy", comment: ""), "copy:", "c"),
+      (NSLocalizedString("Paste", comment: ""), "paste:", "v"),
+      (NSLocalizedString("Select All", comment: ""), "selectAll:", "a"),
     ] { edit.addItem(withTitle: name, action: Selector(action), keyEquivalent: key) }
-    let reportItem = NSMenuItem(title: "보고서", action: nil, keyEquivalent: "")
+    let reportItem = NSMenuItem(
+      title: NSLocalizedString("Report", comment: ""), action: nil, keyEquivalent: "")
     menu.addItem(reportItem)
-    let reportMenu = NSMenu(title: "보고서")
+    let reportMenu = NSMenu(title: NSLocalizedString("Report", comment: ""))
     reportItem.submenu = reportMenu
     let refresh = reportMenu.addItem(
-      withTitle: "정보 새로고침", action: #selector(self.refresh), keyEquivalent: "r")
+      withTitle: NSLocalizedString("Refresh Inventory", comment: ""),
+      action: #selector(self.refresh), keyEquivalent: "r")
     refresh.target = self
     let search = reportMenu.addItem(
-      withTitle: "패키지 검색", action: #selector(focusSearch), keyEquivalent: "f")
+      withTitle: NSLocalizedString("Search Packages", comment: ""), action: #selector(focusSearch),
+      keyEquivalent: "f")
     search.target = self
     NSApp.mainMenu = menu
   }
@@ -148,7 +159,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     refreshButton.isHidden = true
     web.isHidden = !hasDisplayedData
     loading.isHidden = hasDisplayedData
-    loadingTitle.stringValue = "Homebrew 정보를 불러오는 중입니다…"
+    loadingTitle.stringValue = NSLocalizedString("Loading Homebrew information…", comment: "")
     loadingSpinner.startAnimation(nil)
     sendRefreshState()
     if !pageReady {
@@ -260,7 +271,8 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
       loadReport()
       return
     }
-    loadingTitle.stringValue = "정보를 불러오지 못했습니다. 새로고침해 주세요."
+    loadingTitle.stringValue = NSLocalizedString(
+      "Could not load the inventory. Please refresh to try again.", comment: "")
     refreshButton.isHidden = false
   }
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -282,11 +294,13 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     let app = Bundle.main.bundleURL
     let reports = output.deletingLastPathComponent()
     let alert = NSAlert()
-    alert.messageText = "앱을 제거할까요?"
-    alert.informativeText = "앱과 데이터를 휴지통으로 이동합니다.\n\nHomebrew 패키지는 유지됩니다."
+    alert.messageText = NSLocalizedString("Remove BrewPeek?", comment: "")
+    alert.informativeText = NSLocalizedString(
+      "Move the app and its data to the Trash.\n\nYour Homebrew packages will be kept.", comment: ""
+    )
     alert.alertStyle = .warning
-    alert.addButton(withTitle: "취소")
-    alert.addButton(withTitle: "휴지통으로 이동")
+    alert.addButton(withTitle: NSLocalizedString("Cancel", comment: ""))
+    alert.addButton(withTitle: NSLocalizedString("Move to Trash", comment: ""))
     alert.beginSheetModal(for: window) { response in
       guard response == .alertSecondButtonReturn else {
         self.busy = false
@@ -306,9 +320,10 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   }
   func showError(_ message: String) {
     let alert = NSAlert()
-    alert.messageText = "보고서 작업을 완료하지 못했습니다."
+    alert.messageText = NSLocalizedString(
+      "Could not complete the inventory operation.", comment: "")
     alert.informativeText = message
-    alert.addButton(withTitle: "확인")
+    alert.addButton(withTitle: NSLocalizedString("OK", comment: ""))
     alert.beginSheetModal(for: window)
   }
   func webView(

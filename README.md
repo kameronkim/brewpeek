@@ -15,6 +15,8 @@ With Homebrew installed on your Mac, open `BrewPeek.app`. BrewPeek shows your sa
 3. Click a package row to expand its details.
 4. After changing your Homebrew installation, click **Refresh**.
 
+The app menus, loading messages, and native dialogs support English and Korean, following your macOS language preference, including an app-specific language preference for BrewPeek. The package inventory page is in English.
+
 ## Reading the overview
 
 The numbers at the top summarize your current installation.
@@ -94,4 +96,4 @@ Each refresh replaces the saved inventory with the latest snapshot.
 
 ## Removing BrewPeek
 
-Open the **BrewPeek** app menu and choose **BrewPeek 제거…**. Confirm with **휴지통으로 이동** to move the app and its saved data to Trash. Your Homebrew packages remain installed.
+Open the **BrewPeek** app menu and choose **Remove BrewPeek…**. Confirm with **Move to Trash** to move the app and its saved data to Trash. Your Homebrew packages remain installed.

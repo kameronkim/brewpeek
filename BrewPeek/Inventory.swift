@@ -31,7 +31,10 @@ final class Inventory {
   private func checkCancellation() throws {
     processLock.lock()
     defer { processLock.unlock() }
-    if cancelled { throw InventoryError(message: "정보 수집을 취소했습니다.") }
+    if cancelled {
+      throw InventoryError(
+        message: NSLocalizedString("Inventory collection was cancelled.", comment: ""))
+    }
   }
   static func locateBrew() throws -> String {
     let candidates =
@@ -41,7 +44,8 @@ final class Inventory {
       }
     guard let result = candidates.first(where: { FileManager.default.isExecutableFile(atPath: $0) })
     else {
-      throw InventoryError(message: "Homebrew 실행 파일을 찾지 못했습니다.")
+      throw InventoryError(
+        message: NSLocalizedString("Could not find the Homebrew executable.", comment: ""))
     }
     return result
   }
@@ -80,7 +84,8 @@ final class Inventory {
     processLock.lock()
     if cancelled {
       processLock.unlock()
-      throw InventoryError(message: "정보 수집을 취소했습니다.")
+      throw InventoryError(
+        message: NSLocalizedString("Inventory collection was cancelled.", comment: ""))
     }
     do {
       try task.run()
@@ -102,7 +107,8 @@ final class Inventory {
         finished.wait()
       }
       throw InventoryError(
-        message: "명령 실행 시간이 초과되었습니다: " + executable + " " + arguments.joined(separator: " "))
+        message: NSLocalizedString("The command timed out: ", comment: "") + executable + " "
+          + arguments.joined(separator: " "))
     }
     try checkCancellation()
     guard task.terminationStatus == 0 else {
@@ -159,17 +165,24 @@ final class Inventory {
       if refreshMetadata { _ = try run(brew, ["update", "--quiet"], timeout: 90) }
       let text = try run(brew, ["outdated", "--json=v2"], timeout: 90)
       guard let result = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? Record else {
-        throw InventoryError(message: "Homebrew 업데이트 정보를 읽지 못했습니다.")
+        throw InventoryError(
+          message: NSLocalizedString("Could not read Homebrew update information.", comment: ""))
       }
       func versions(_ value: Any?) throws -> [String: String] {
         guard let records = value as? [Record] else {
-          throw InventoryError(message: "Homebrew 업데이트 목록의 형식이 올바르지 않습니다.")
+          throw InventoryError(
+            message: NSLocalizedString(
+              "The Homebrew update list has an invalid format.", comment: ""))
         }
         var versions: [String: String] = [:]
         for record in records {
           guard let name = record["name"] as? String, !name.isEmpty,
             let version = record["current_version"] as? String, !version.isEmpty
-          else { throw InventoryError(message: "Homebrew 업데이트 버전 정보가 누락되었습니다.") }
+          else {
+            throw InventoryError(
+              message: NSLocalizedString(
+                "Homebrew update version information is missing.", comment: ""))
+          }
           versions[name] = version
         }
         return versions
@@ -189,7 +202,10 @@ final class Inventory {
     let text = try run(brew, ["info", "--json=v2", "--installed"])
     guard let raw = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? Record,
       let formulae = raw["formulae"] as? [Record], let casks = raw["casks"] as? [Record]
-    else { throw InventoryError(message: "Homebrew 데이터 형식을 확인할 수 없습니다.") }
+    else {
+      throw InventoryError(
+        message: NSLocalizedString("The Homebrew data has an invalid format.", comment: ""))
+    }
     let leaves = Set(lines(try run(brew, ["leaves"])))
     let taps = lines(try run(brew, ["tap"]))
     let prefix = try run(brew, ["--prefix"])
@@ -198,7 +214,7 @@ final class Inventory {
     var reverse: [String: Set<String>] = [:]
     for formula in formulae {
       guard let name = formula["name"] as? String else {
-        throw InventoryError(message: "Formula 이름 누락")
+        throw InventoryError(message: NSLocalizedString("Formula name is missing.", comment: ""))
       }
       for dep in dependencies(formula) {
         reverse[String(dep.split(separator: "/").last ?? Substring(dep)), default: []].insert(name)
@@ -208,10 +224,14 @@ final class Inventory {
     var formulas: [Record] = []
     for formula in formulae {
       guard let name = formula["name"] as? String, let receipts = formula["installed"] as? [Record]
-      else { throw InventoryError(message: "Formula 설치 기록 누락") }
+      else {
+        throw InventoryError(
+          message: NSLocalizedString("Formula installation records are missing.", comment: ""))
+      }
       let versions = receipts.compactMap { $0["version"] as? String }
       guard versions.count == receipts.count else {
-        throw InventoryError(message: "설치 버전 누락: " + name)
+        throw InventoryError(
+          message: NSLocalizedString("Installed version is missing: ", comment: "") + name)
       }
       let id = "formula:" + (formula["full_name"] as? String ?? name)
       sizeRequests.append(
@@ -234,7 +254,7 @@ final class Inventory {
     var applications: [Record] = []
     for cask in casks {
       guard let name = cask["token"] as? String else {
-        throw InventoryError(message: "Cask token 누락")
+        throw InventoryError(message: NSLocalizedString("Cask token is missing.", comment: ""))
       }
       let id = "cask:" + (cask["full_token"] as? String ?? name)
       let installation: Record = [
@@ -343,10 +363,15 @@ final class Inventory {
       ".homebrew-report.lock"
     ).path
     let fd = open(lockPath, O_CREAT | O_RDWR, 0o600)
-    guard fd >= 0 else { throw InventoryError(message: "저장 폴더에 쓸 수 없습니다.") }
+    guard fd >= 0 else {
+      throw InventoryError(
+        message: NSLocalizedString("Cannot write to the data folder.", comment: ""))
+    }
     defer { close(fd) }
     guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
-      throw InventoryError(message: "다른 보고서 생성이 진행 중입니다. 잠시 후 다시 실행해 주세요.")
+      throw InventoryError(
+        message: NSLocalizedString(
+          "Another inventory collection is in progress. Please try again shortly.", comment: ""))
     }
     defer { flock(fd, LOCK_UN) }
     let snapshot = try collect(previous: try? InventoryStore.load(output))
