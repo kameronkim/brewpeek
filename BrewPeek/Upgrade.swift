@@ -66,6 +66,23 @@ final class UpgradePreparation {
   }
 }
 
+/// Keep recent activity in a byte-bounded buffer without splitting a UTF-8 scalar.
+private struct UpdateLogBuffer {
+  private static let byteLimit = 1_000_000
+  private var bytes = Data()
+  var isEmpty: Bool { bytes.isEmpty }
+  var text: String { String(decoding: bytes, as: UTF8.self) }
+
+  mutating func append(_ text: String) {
+    bytes.append(contentsOf: text.utf8)
+    if bytes.count > Self.byteLimit {
+      // Trim in batches to avoid copying the entire buffer for every new line.
+      bytes = Data(bytes.suffix(Self.byteLimit / 2).drop(while: { $0 & 0xc0 == 0x80 }))
+    }
+  }
+  mutating func removeAll() { bytes.removeAll(keepingCapacity: true) }
+}
+
 /// All commands run off the main thread. Arguments come from Homebrew metadata, never shell text.
 final class Upgrade {
   let inventory: Inventory
@@ -164,34 +181,38 @@ final class Upgrade {
     try task.run()
     // Read continuously, draining both streams together. Never timeout/kill an installation.
     var pending = Data()
-    var output = ""
+    var output = UpdateLogBuffer()
     while true {
       let chunk = pipe.fileHandleForReading.availableData
       if chunk.isEmpty { break }
       pending.append(chunk)
       if pending.count > 262_144 {
-        let line = String(decoding: pending, as: UTF8.self)
-        pending.removeAll()
-        output += line
+        var end = pending.index(pending.startIndex, offsetBy: 262_144)
+        while end > pending.startIndex && pending[end] & 0xc0 == 0x80 {
+          end = pending.index(before: end)
+        }
+        if end == pending.startIndex { end = pending.index(pending.startIndex, offsetBy: 262_144) }
+        let line = String(decoding: pending[..<end], as: UTF8.self)
+        pending.removeSubrange(..<end)
+        output.append(line)
         streaming?(line)
       }
       while let end = pending.firstIndex(of: 10) {
         let line = String(decoding: pending[..<end], as: UTF8.self).replacingOccurrences(
           of: "\r", with: "")
         pending.removeSubrange(...end)
-        output += line + "\n"
-        if output.utf8.count > 1_000_000 { output = String(output.suffix(500_000)) }
+        output.append(line + "\n")
         streaming?(line)
       }
     }
     if !pending.isEmpty {
       let line = String(decoding: pending, as: UTF8.self)
-      output += line
+      output.append(line)
       streaming?(line)
     }
     task.waitUntilExit()
     try? pipe.fileHandleForReading.close()
-    return (task.terminationStatus, output)
+    return (task.terminationStatus, output.text)
   }
   func json(_ arguments: [String], control: UpgradePreparation? = nil) throws -> Record {
     let text =
@@ -405,14 +426,45 @@ final class Upgrade {
     let before = try installed()
     var items = plan.packages
     var states = Dictionary(uniqueKeysWithValues: items.map { ($0.id, "Waiting for Homebrew") })
+    var sentStates = states
+    var packagesChanged = false
     var touched = Set<String>()
-    var bufferedLines: [String] = []
+    var bufferedLines = UpdateLogBuffer()
     var lastEvent = Date.distantPast
     event(["kind": "progress", "packages": items.map(\.record), "states": states, "processed": 0])
+    func flushActivity() {
+      var update: Record = ["kind": "activity", "line": bufferedLines.text]
+      if packagesChanged {
+        update["packages"] = items.map(\.record)
+        packagesChanged = false
+      }
+      if states != sentStates {
+        update["states"] = states
+        update["processed"] = states.values.filter { $0 == "Awaiting verification" }.count
+        sentStates = states
+      }
+      event(update)
+      bufferedLines.removeAll()
+      lastEvent = Date()
+    }
     let result = try command(["upgrade", "--no-ask"] + plan.selected.map(\.argument)) { line in
-      if let range = line.range(
-        of: #"Installing (?:.* dependency: |dependencies for [^:]+: )"#, options: .regularExpression
-      ) {
+      let installing = line.contains("Installing")
+      let phase: String?
+      if installing || line.contains("Upgrading") || line.contains("Pouring") {
+        phase = "Installing…"
+      } else if line.contains("Downloading") || line.contains("Fetching") {
+        phase = "Downloading…"
+      } else if line.contains("successfully") || line.contains("🍺") {
+        phase = "Awaiting verification"
+      } else {
+        phase = nil
+      }
+      if installing,
+        let range = line.range(
+          of: #"Installing (?:.* dependency: |dependencies for [^:]+: )"#,
+          options: .regularExpression
+        )
+      {
         let names = line[range.upperBound...].components(separatedBy: ", ").map {
           $0.trimmingCharacters(in: .whitespacesAndNewlines)
         }.filter(Self.validName)
@@ -426,6 +478,7 @@ final class Upgrade {
               current: old?.current ?? [], next: "", receipt: old?.receipt ?? "", apps: [],
               reason: "Detected during execution", dependencies: old?.dependencies ?? [])
             items.append(item)
+            packagesChanged = true
             states[item.id] = "Waiting for Homebrew"
           }
         }
@@ -443,48 +496,34 @@ final class Upgrade {
             let dependency = Self.relationshipID(name, type: "formula")
             if !items[parent].dependencies.contains(dependency) {
               items[parent].dependencies.append(dependency)
+              packagesChanged = true
             }
           }
         }
         items = Self.explainRelationships(items)
       }
       // Output is activity, not proof of success. Percentages are intentionally not inferred.
-      for p in items
-      where line.range(
-        of: "(?<![A-Za-z0-9@+_.-])" + NSRegularExpression.escapedPattern(for: p.name)
-          + "(?![A-Za-z0-9@+_.-])", options: .regularExpression) != nil
-      {
-        if line.contains("Installing") || line.contains("Upgrading") || line.contains("Pouring") {
-          states[p.id] = "Installing…"
-          touched.insert(p.id)
-        } else if line.contains("Downloading") || line.contains("Fetching") {
-          states[p.id] = "Downloading…"
-        } else if line.contains("successfully") || line.contains("🍺") {
-          states[p.id] = "Awaiting verification"
-          touched.insert(p.id)
+      if let phase {
+        for p in items
+        where line.range(
+          of: "(?<![A-Za-z0-9@+_.-])" + NSRegularExpression.escapedPattern(for: p.name)
+            + "(?![A-Za-z0-9@+_.-])", options: .regularExpression) != nil
+        {
+          states[p.id] = phase
+          if phase != "Downloading…" { touched.insert(p.id) }
         }
       }
+      if !bufferedLines.isEmpty { bufferedLines.append("\n") }
       bufferedLines.append(line)
-      if Date().timeIntervalSince(lastEvent) >= 0.1 {
-        event([
-          "kind": "activity", "line": bufferedLines.joined(separator: "\n"),
-          "packages": items.map(\.record), "states": states,
-          "processed": states.values.filter { $0 == "Awaiting verification" }.count,
-        ])
-        bufferedLines.removeAll()
-        lastEvent = Date()
-      }
+      if Date().timeIntervalSince(lastEvent) >= 0.1 { flushActivity() }
     }
-    if !bufferedLines.isEmpty {
-      event([
-        "kind": "activity", "line": bufferedLines.joined(separator: "\n"),
-        "packages": items.map(\.record), "states": states,
-        "processed": states.values.filter { $0 == "Awaiting verification" }.count,
-      ])
-    }
+    if !bufferedLines.isEmpty { flushActivity() }
     event(["kind": "verifying"])
     let after: [UpgradePackage]
     do { after = try installed() } catch {
+      var details = UpdateLogBuffer()
+      details.append(result.1)
+      details.append("\n" + error.localizedDescription)
       return [
         "kind": "result",
         "packages": items.map { p -> Record in
@@ -492,7 +531,7 @@ final class Upgrade {
           r["outcome"] = "attention"
           r["message"] = "Could not verify installed version"
           return r
-        }, "details": result.1 + "\n" + error.localizedDescription, "verified": false,
+        }, "details": details.text, "verified": false,
       ]
     }
     items = items.map { p in

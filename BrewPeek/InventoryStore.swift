@@ -7,7 +7,8 @@ enum InventoryStore {
       value["formulae"] is [[String: Any]], value["casks"] is [[String: Any]],
       value["taps"] is [String], value["environment"] is [String: Any]
     else {
-      throw InventoryError(message: "저장된 설치 정보의 형식이 올바르지 않습니다.")
+      throw InventoryError(
+        message: NSLocalizedString("The saved inventory has an invalid format.", comment: ""))
     }
     return value
   }
@@ -22,6 +23,12 @@ enum InventoryStore {
   static func load(_ url: URL) throws -> [String: Any] {
     try decode(Data(contentsOf: url))
   }
+  /// Internal cache metadata stays native; the web view only receives display data.
+  static func displaySnapshot(_ value: Record) -> Record {
+    var snapshot = value
+    snapshot.removeValue(forKey: "sizeCache")
+    return snapshot
+  }
   static func migrateLegacy(to url: URL) throws {
     let legacy = url.deletingLastPathComponent().appendingPathComponent("homebrew-inventory.html")
     guard FileManager.default.fileExists(atPath: legacy.path) else { return }
@@ -30,7 +37,9 @@ enum InventoryStore {
       guard let start = html.range(of: "const brewData = "),
         let end = html.range(of: ";\n", range: start.upperBound..<html.endIndex)
       else {
-        throw InventoryError(message: "이전 보고서의 데이터를 읽지 못했습니다.")
+        throw InventoryError(
+          message: NSLocalizedString(
+            "Could not read the data from the previous report.", comment: ""))
       }
       let value = try decode(Data(html[start.upperBound..<end.lowerBound].utf8))
       try save(value, to: url)

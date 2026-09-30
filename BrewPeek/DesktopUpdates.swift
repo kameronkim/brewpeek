@@ -46,6 +46,7 @@ extension DesktopApp {
   }
 
   private func prepareUpdate(keys: [String], requestID: String) {
+    reportLoadID = nil
     busy = true
     updatePreparing = true
     updateRequestID = requestID
@@ -83,7 +84,9 @@ extension DesktopApp {
       guard let url = app.bundleURL,
         plan.packages.contains(where: { p in
           p.type == "cask"
-            && p.apps.contains { URL(fileURLWithPath: $0).lastPathComponent == url.lastPathComponent }
+            && p.apps.contains { appPath in
+              URL(fileURLWithPath: appPath).lastPathComponent == url.lastPathComponent
+            }
         })
       else { return nil }
       return app.localizedName ?? url.deletingPathExtension().lastPathComponent
@@ -138,9 +141,13 @@ extension DesktopApp {
           }
           // Keep results even if inventory collection fails after an otherwise completed upgrade.
           do {
-            let snapshot = try engine.inventory.collect(refreshMetadata: false)
+            let affected = Set(
+              (result["packages"] as? [Record] ?? []).compactMap { $0["id"] as? String })
+            let snapshot = try engine.inventory.collect(
+              refreshMetadata: false, previous: try? InventoryStore.load(destination),
+              invalidatingSizes: affected)
             try InventoryStore.save(snapshot, to: destination)
-            result["snapshot"] = snapshot
+            result["snapshot"] = InventoryStore.displaySnapshot(snapshot)
           } catch { result["refreshError"] = error.localizedDescription }
           result["retryKeys"] = fresh.selected.map(\.id)
           result["command"] =

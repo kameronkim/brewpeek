@@ -6,10 +6,12 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
 {
   var window: NSWindow!
   var web: WKWebView!
-  let refreshButton = NSButton(title: "새로고침", target: nil, action: nil)
+  let refreshButton = NSButton(
+    title: NSLocalizedString("Refresh", comment: ""), target: nil, action: nil)
   let loading = NSStackView()
   let loadingSpinner = NSProgressIndicator()
-  let loadingTitle = NSTextField(labelWithString: "Homebrew 정보를 불러오는 중입니다…")
+  let loadingTitle = NSTextField(
+    labelWithString: NSLocalizedString("Loading Homebrew information…", comment: ""))
   var hasDisplayedData = false
   var inventoryRefreshState = "idle"
   var collectingInventory: Inventory?
@@ -24,6 +26,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
       .appendingPathComponent("BrewPeek", isDirectory: true)
       .appendingPathComponent("inventory.json")
   }
+  var reportLoadID: UUID?
   var pageReady = false
   var page: URL { Bundle.main.resourceURL!.appendingPathComponent("index.html") }
   func applicationDidFinishLaunching(_ notification: Notification) {
@@ -101,28 +104,37 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     let appMenu = NSMenu()
     appItem.submenu = appMenu
     let remove = appMenu.addItem(
-      withTitle: "BrewPeek 제거…", action: #selector(removeApp), keyEquivalent: "")
+      withTitle: NSLocalizedString("Remove BrewPeek…", comment: ""), action: #selector(removeApp),
+      keyEquivalent: "")
     remove.target = self
     appMenu.addItem(.separator())
     appMenu.addItem(
-      withTitle: "BrewPeek 종료", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-    let editItem = NSMenuItem(title: "편집", action: nil, keyEquivalent: "")
+      withTitle: NSLocalizedString("Quit BrewPeek", comment: ""),
+      action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+    let editItem = NSMenuItem(
+      title: NSLocalizedString("Edit", comment: ""), action: nil, keyEquivalent: "")
     menu.addItem(editItem)
-    let edit = NSMenu(title: "편집")
+    let edit = NSMenu(title: NSLocalizedString("Edit", comment: ""))
     editItem.submenu = edit
     for (name, action, key) in [
-      ("실행 취소", "undo:", "z"), ("오려두기", "cut:", "x"), ("복사", "copy:", "c"), ("붙여넣기", "paste:", "v"),
-      ("전체 선택", "selectAll:", "a"),
+      (NSLocalizedString("Undo", comment: ""), "undo:", "z"),
+      (NSLocalizedString("Cut", comment: ""), "cut:", "x"),
+      (NSLocalizedString("Copy", comment: ""), "copy:", "c"),
+      (NSLocalizedString("Paste", comment: ""), "paste:", "v"),
+      (NSLocalizedString("Select All", comment: ""), "selectAll:", "a"),
     ] { edit.addItem(withTitle: name, action: Selector(action), keyEquivalent: key) }
-    let reportItem = NSMenuItem(title: "보고서", action: nil, keyEquivalent: "")
+    let reportItem = NSMenuItem(
+      title: NSLocalizedString("Report", comment: ""), action: nil, keyEquivalent: "")
     menu.addItem(reportItem)
-    let reportMenu = NSMenu(title: "보고서")
+    let reportMenu = NSMenu(title: NSLocalizedString("Report", comment: ""))
     reportItem.submenu = reportMenu
     let refresh = reportMenu.addItem(
-      withTitle: "정보 새로고침", action: #selector(self.refresh), keyEquivalent: "r")
+      withTitle: NSLocalizedString("Refresh Inventory", comment: ""),
+      action: #selector(self.refresh), keyEquivalent: "r")
     refresh.target = self
     let search = reportMenu.addItem(
-      withTitle: "패키지 검색", action: #selector(focusSearch), keyEquivalent: "f")
+      withTitle: NSLocalizedString("Search Packages", comment: ""), action: #selector(focusSearch),
+      keyEquivalent: "f")
     search.target = self
     NSApp.mainMenu = menu
   }
@@ -140,13 +152,14 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   }
   @objc func refresh() {
     guard !busy, updatePlan == nil, updateRequestID == nil else { return }
+    reportLoadID = nil
     busy = true
     inventoryRefreshState = "refreshing"
     refreshButton.isEnabled = false
     refreshButton.isHidden = true
     web.isHidden = !hasDisplayedData
     loading.isHidden = hasDisplayedData
-    loadingTitle.stringValue = "Homebrew 정보를 불러오는 중입니다…"
+    loadingTitle.stringValue = NSLocalizedString("Loading Homebrew information…", comment: "")
     loadingSpinner.startAnimation(nil)
     sendRefreshState()
     if !pageReady {
@@ -200,34 +213,51 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     web.evaluateJavaScript("window.focusPackageSearch()", completionHandler: nil)
   }
   func loadReport() {
-    guard pageReady, FileManager.default.fileExists(atPath: output.path) else { return }
-    do {
-      let snapshot = try InventoryStore.load(output)
-      web.isHidden = false
-      web.callAsyncJavaScript(
-        """
-        window.setInventory(snapshot);
-        window.setRefreshState(refreshState);
-        return true;
-        """,
-        arguments: ["snapshot": snapshot, "refreshState": inventoryRefreshState], in: nil,
-        in: .page
-      ) { result in
-        if case .failure(let error) = result {
+    guard pageReady else { return }
+    let requestID = UUID()
+    reportLoadID = requestID
+    let destination = output
+    DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+      let result = Result<Record?, Error> {
+        guard FileManager.default.fileExists(atPath: destination.path) else { return nil }
+        return InventoryStore.displaySnapshot(try InventoryStore.load(destination))
+      }
+      DispatchQueue.main.async { [weak self] in
+        guard let self, self.reportLoadID == requestID, self.pageReady else { return }
+        switch result {
+        case .success(let snapshot):
+          guard let snapshot else {
+            if self.inventoryRefreshState != "refreshing" { self.showLoadingFailure() }
+            return
+          }
+          self.web.isHidden = false
+          self.web.callAsyncJavaScript(
+            """
+            window.setInventory(snapshot);
+            window.setRefreshState(refreshState);
+            return true;
+            """,
+            arguments: ["snapshot": snapshot, "refreshState": self.inventoryRefreshState], in: nil,
+            in: .page
+          ) { [weak self] result in
+            guard let self, self.reportLoadID == requestID, self.pageReady else { return }
+            if case .failure(let error) = result {
+              self.showLoadingFailure()
+              self.showError(error.localizedDescription)
+            } else {
+              self.hasDisplayedData = true
+              self.loadingSpinner.stopAnimation(nil)
+              self.loading.isHidden = true
+              self.web.isHidden = false
+            }
+          }
+        case .failure(let error):
+          // A corrupt saved snapshot must not interrupt the fresh collection.
+          if self.inventoryRefreshState == "refreshing" { return }
           self.showLoadingFailure()
           self.showError(error.localizedDescription)
-        } else {
-          self.hasDisplayedData = true
-          self.loadingSpinner.stopAnimation(nil)
-          self.loading.isHidden = true
-          self.web.isHidden = false
         }
       }
-    } catch {
-      // A corrupt saved snapshot must not interrupt the fresh collection.
-      if inventoryRefreshState == "refreshing" { return }
-      showLoadingFailure()
-      showError(error.localizedDescription)
     }
   }
   func showLoadingFailure(useSavedData: Bool = false) {
@@ -241,7 +271,8 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
       loadReport()
       return
     }
-    loadingTitle.stringValue = "정보를 불러오지 못했습니다. 새로고침해 주세요."
+    loadingTitle.stringValue = NSLocalizedString(
+      "Could not load the inventory. Please refresh to try again.", comment: "")
     refreshButton.isHidden = false
   }
   func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
@@ -263,11 +294,13 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     let app = Bundle.main.bundleURL
     let reports = output.deletingLastPathComponent()
     let alert = NSAlert()
-    alert.messageText = "앱을 제거할까요?"
-    alert.informativeText = "앱과 데이터를 휴지통으로 이동합니다.\n\nHomebrew 패키지는 유지됩니다."
+    alert.messageText = NSLocalizedString("Remove BrewPeek?", comment: "")
+    alert.informativeText = NSLocalizedString(
+      "Move the app and its data to the Trash.\n\nYour Homebrew packages will be kept.", comment: ""
+    )
     alert.alertStyle = .warning
-    alert.addButton(withTitle: "취소")
-    alert.addButton(withTitle: "휴지통으로 이동")
+    alert.addButton(withTitle: NSLocalizedString("Cancel", comment: ""))
+    alert.addButton(withTitle: NSLocalizedString("Move to Trash", comment: ""))
     alert.beginSheetModal(for: window) { response in
       guard response == .alertSecondButtonReturn else {
         self.busy = false
@@ -287,9 +320,10 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   }
   func showError(_ message: String) {
     let alert = NSAlert()
-    alert.messageText = "보고서 작업을 완료하지 못했습니다."
+    alert.messageText = NSLocalizedString(
+      "Could not complete the inventory operation.", comment: "")
     alert.informativeText = message
-    alert.addButton(withTitle: "확인")
+    alert.addButton(withTitle: NSLocalizedString("OK", comment: ""))
     alert.beginSheetModal(for: window)
   }
   func webView(
@@ -316,6 +350,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     decisionHandler(.cancel)
   }
   func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+    reportLoadID = nil
     pageReady = false
     hasDisplayedData = false
     showLoadingFailure()
@@ -326,6 +361,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     withError error: Error
   ) {
     if (error as NSError).code != NSURLErrorCancelled {
+      reportLoadID = nil
       pageReady = false
       hasDisplayedData = false
       showLoadingFailure()
@@ -333,7 +369,12 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     }
   }
   func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+  func windowWillClose(_ notification: Notification) {
+    pageReady = false
+    reportLoadID = nil
+  }
   func applicationWillTerminate(_ notification: Notification) {
+    reportLoadID = nil
     collectingInventory?.cancel()
     preparationControl?.cancel()
   }
