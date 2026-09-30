@@ -84,7 +84,9 @@ extension DesktopApp {
       guard let url = app.bundleURL,
         plan.packages.contains(where: { p in
           p.type == "cask"
-            && p.apps.contains { URL(fileURLWithPath: $0).lastPathComponent == url.lastPathComponent }
+            && p.apps.contains { appPath in
+              URL(fileURLWithPath: appPath).lastPathComponent == url.lastPathComponent
+            }
         })
       else { return nil }
       return app.localizedName ?? url.deletingPathExtension().lastPathComponent
