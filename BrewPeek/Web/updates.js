@@ -7,6 +7,9 @@ let activeRequest = null;
 let processedPackages = 0;
 let popupScroll = null,
   activity = [],
+  activitySizes = [],
+  activityBytes = 0,
+  activityDirty = false,
   progressPackages = [],
   progressStates = {};
 let popupReturnFocus = null;
@@ -108,6 +111,10 @@ function showNotice(title, copy, command = '', kind = 'info') {
   if (!$('notice').open) $('notice').showModal();
 }
 $('notice-ok').onclick = () => $('notice').close();
+$('notice').addEventListener('close', () => {
+  if ($('notice').open) return;
+  for (const id of ['notice-title', 'notice-copy', 'notice-command']) $(id).textContent = '';
+});
 function checkChanges(keys, trigger = document.activeElement) {
   if (updateBusy() || inventoryRefreshState !== 'idle' || !keys.length) return;
   if (!popupScroll) popupReturnFocus = captureInventoryFocus(trigger);
@@ -184,6 +191,11 @@ $('cancel').onclick = () => {
   $('confirm').close();
 };
 $('confirm').addEventListener('cancel', cancelUpdate);
+$('confirm').addEventListener('close', () => {
+  if ($('confirm').open) return;
+  $('confirm-list').replaceChildren();
+  $('confirm-error').replaceChildren();
+});
 $('confirm').addEventListener('keydown', (event) => {
   if (updateMode !== 'confirming' || event.altKey || event.ctrlKey || event.metaKey) return;
   const list = document.querySelector('.confirm-scroll');
@@ -217,49 +229,102 @@ $('packages').addEventListener(
   true
 );
 bulk.onclick = () => checkChanges(allPackages.filter((p) => p.availableVersion).map(key), bulk);
+const activityByteLimit = 1_000_000;
+const activityEncoder = new TextEncoder();
+const activityDecoder = new TextDecoder();
+function appendActivity(line) {
+  let bytes = activityEncoder.encode(line);
+  if (bytes.length > activityByteLimit) {
+    let start = bytes.length - activityByteLimit;
+    while ((bytes[start] & 0xc0) === 0x80) start++;
+    bytes = bytes.subarray(start);
+    line = activityDecoder.decode(bytes);
+  }
+  activity.push(line);
+  // Count the separator too; the final entry has no trailing newline.
+  activitySizes.push(bytes.length + 1);
+  activityBytes += bytes.length + 1;
+  while (activity.length > 1500 || activityBytes - 1 > activityByteLimit) {
+    activityBytes -= activitySizes.shift();
+    activity.shift();
+  }
+  activityDirty = true;
+}
+function paintActivity() {
+  const log = $('activity-log');
+  if (!activityDirty || !log || !$('progress-log').open) return;
+  const bottom = log.scrollHeight - log.scrollTop - log.clientHeight < 30;
+  log.textContent = activity.join('\n');
+  activityDirty = false;
+  if (bottom) log.scrollTop = log.scrollHeight;
+}
+function clearProgressData() {
+  activity = [];
+  activitySizes = [];
+  activityBytes = 0;
+  activityDirty = false;
+  progressPackages = [];
+  progressStates = {};
+  processedPackages = 0;
+}
 function beginProgress(plan) {
   previousResult = null;
-  activity = [];
-  progressStates = {};
+  clearProgressData();
   progressPackages = plan.packages;
   setUpdateMode('running');
   $('operation').innerHTML =
     `<section class="operation"><div class="operation-top"><div><div class="eyebrow" id="operation-phase">UPDATE IN PROGRESS</div><h3><span class="pulse"></span><span id="operation-title">Updating packages</span></h3><p id="operation-copy">Homebrew controls parallel downloads and installation order.</p></div></div><div class="progress-summary"><span>Packages processed · including dependencies</span><span id="processed">0 of ${progressPackages.length}</span></div><div class="progress-track"><div class="progress-fill" id="overall-fill"></div></div><p id="discovered" hidden>Additional related changes detected. The total includes these packages.</p><details id="progress-items"><summary id="progress-count"></summary><div class="bounded-list" id="progress-rows"></div></details><details id="progress-log"><summary>Show activity</summary><pre id="activity-log"></pre></details></section>`;
+  $('progress-items').ontoggle = () => paintProgress();
+  $('progress-log').ontoggle = paintActivity;
   paintProgress(0);
   scrollOperationIntoView();
+}
+function setProgressText(element, text) {
+  if (element.textContent === text) return false;
+  element.textContent = text;
+  return true;
 }
 function paintProgress(processed = processedPackages) {
   processedPackages = processed;
   if (!$('progress-rows')) return;
-  $('processed').textContent = `${processed} of ${progressPackages.length}`;
-  $('overall-fill').style.width =
-    `${progressPackages.length ? (processed / progressPackages.length) * 100 : 0}%`;
-  $('progress-count').textContent = `Package details · ${progressPackages.length}`;
-  $('discovered').hidden = !progressPackages.some((p) => p.reason === 'Detected during execution');
+  const fill = $('overall-fill');
+  if (
+    setProgressText($('processed'), `${processed} of ${progressPackages.length}`) ||
+    !fill.style.width
+  )
+    fill.style.width = `${progressPackages.length ? (processed / progressPackages.length) * 100 : 0}%`;
+  setProgressText($('progress-count'), `Package details · ${progressPackages.length}`);
+  const undiscovered = !progressPackages.some((p) => p.reason === 'Detected during execution');
+  if ($('discovered').hidden !== undiscovered) $('discovered').hidden = undiscovered;
+  // Keep the latest state in memory; collapsed details catch up when opened.
+  if (!$('progress-items').open) return;
   const container = $('progress-rows');
+  const rows = new Map([...container.children].map((node) => [node.dataset.package, node]));
   for (const p of progressPackages) {
-    let row = [...container.children].find((node) => node.dataset.package === p.id);
+    let row = rows.get(p.id);
     if (!row) {
       row = document.createElement('div');
       row.className = 'download-item';
       row.dataset.package = p.id;
       row.innerHTML = `<span>${esc(p.name)}<small class="dependency-note">${esc(p.relationship || p.reason)}</small></span><div class="progress-track"><div class="progress-fill"></div></div><span class="download-state"></span>`;
       container.append(row);
+      rows.set(p.id, row);
     }
-    row.querySelector('.dependency-note').textContent = p.relationship || p.reason;
+    setProgressText(row.querySelector('.dependency-note'), p.relationship || p.reason);
     const text =
       updateMode === 'verifying'
         ? 'Verifying installed version…'
         : progressStates[p.id] || 'Waiting for Homebrew';
-    row.querySelector('.download-state').textContent = text;
-    row
-      .querySelector('.progress-track')
-      .classList.toggle(
-        'indeterminate',
-        !['Waiting for Homebrew', 'Awaiting verification'].includes(text)
-      );
-    row.querySelector('.progress-fill').style.width =
-      text === 'Awaiting verification' ? '100%' : '0%';
+    const fill = row.querySelector('.progress-fill');
+    if (setProgressText(row.querySelector('.download-state'), text) || !fill.style.width) {
+      row
+        .querySelector('.progress-track')
+        .classList.toggle(
+          'indeterminate',
+          !['Waiting for Homebrew', 'Awaiting verification'].includes(text)
+        );
+      fill.style.width = text === 'Awaiting verification' ? '100%' : '0%';
+    }
   }
 }
 function paintResult(result) {
@@ -274,7 +339,10 @@ function paintResult(result) {
   $('dismiss').onclick = () => {
     const view = captureInventoryView();
     previousResult = null;
+    requestedKeys = [];
+    activeRequest = null;
     $('operation').replaceChildren();
+    setUpdateMode('ready');
     restoreInventoryView(view);
   };
   document.querySelectorAll('[data-retry]').forEach(
@@ -319,16 +387,11 @@ window.receiveUpdate = function (event) {
       break;
     case 'activity': {
       if (event.packages) progressPackages = event.packages;
-      progressStates = event.states;
-      activity.push(event.line);
-      if (activity.length > 1500) activity.splice(0, activity.length - 1500);
-      const log = $('activity-log');
-      if (log) {
-        const bottom = log.scrollHeight - log.scrollTop - log.clientHeight < 30;
-        log.textContent = activity.join('\n');
-        if (bottom) log.scrollTop = log.scrollHeight;
-      }
-      paintProgress(event.processed);
+      if (event.states) progressStates = event.states;
+      appendActivity(event.line);
+      paintActivity();
+      if (event.packages || event.states || event.processed !== undefined)
+        paintProgress(event.processed);
       break;
     }
     case 'verifying':
@@ -340,11 +403,15 @@ window.receiveUpdate = function (event) {
       break;
     case 'result': {
       const view = captureInventoryView();
+      // The inventory owns the snapshot; retained results only need display and retry data.
+      const { snapshot, ...result } = event;
       updatePlan = null;
-      previousResult = event;
+      activeRequest = null;
+      clearProgressData();
+      previousResult = result;
       setUpdateMode('result');
-      if (event.snapshot) window.setInventory(event.snapshot);
-      paintResult(event);
+      if (snapshot) window.setInventory(snapshot);
+      paintResult(result);
       restoreInventoryView(view);
       syncActionAvailability();
       finishNotice();
@@ -352,11 +419,13 @@ window.receiveUpdate = function (event) {
       break;
     }
     case 'error':
+      clearProgressData();
       if (['checking', 'confirming', 'check-failed'].includes(updateMode)) {
         showCheckError(event.message, event.runningApps);
         break;
       }
       updatePlan = null;
+      activeRequest = null;
       setUpdateMode(previousResult ? 'result' : 'ready');
       if (previousResult) paintResult(previousResult);
       else
