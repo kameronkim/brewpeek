@@ -152,15 +152,8 @@ extension DesktopApp {
             }
             return
           }
-          let shouldStart = DispatchQueue.main.sync { () -> Bool in
-            guard self.updateRequestID == requestID else {
-              _ = self.finishPreparation(requestID)
-              return false
-            }
-            self.updatePreparing = false
-            self.preparationControl = nil
-            self.sendUpdate(["kind": "started", "plan": fresh.record, "requestID": requestID])
-            return true
+          let shouldStart = DispatchQueue.main.sync {
+            self.beginPreparedUpdate(fresh, requestID: requestID)
           }
           guard shouldStart else { return }
           var result = try engine.execute(fresh) { event in
@@ -204,6 +197,28 @@ extension DesktopApp {
         }
       }
     }
+  }
+
+  /// Check the freshly prepared targets on the main queue immediately before mutation.
+  func beginPreparedUpdate(_ plan: UpgradePlan, requestID: String) -> Bool {
+    guard updateRequestID == requestID else {
+      _ = finishPreparation(requestID)
+      return false
+    }
+    let active = runningApps(for: plan.packages)
+    guard active.isEmpty else {
+      guard finishPreparation(requestID) else { return false }
+      sendUpdate([
+        "kind": "error", "runningApps": active, "requestID": requestID,
+        "message": "Close these apps before updating, then retry: "
+          + active.joined(separator: ", "),
+      ])
+      return false
+    }
+    updatePreparing = false
+    preparationControl = nil
+    sendUpdate(["kind": "started", "plan": plan.record, "requestID": requestID])
+    return true
   }
 
   /// Runs on the main queue, including the final cancellation gate before mutation.
