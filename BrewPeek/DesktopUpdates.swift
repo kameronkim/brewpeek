@@ -146,6 +146,8 @@ extension DesktopApp {
           }
           guard shouldStart else { return }
           var result = try engine.execute(fresh) { event in
+            var event = event
+            event["requestID"] = requestID
             DispatchQueue.main.async { self.sendUpdate(event) }
           }
           // Keep results even if inventory collection fails after an otherwise completed upgrade.
@@ -159,22 +161,14 @@ extension DesktopApp {
             }.joined(separator: " ")
           let completed = result
           DispatchQueue.main.async {
-            self.operationPhase = .idle
-            self.updateRequestID = nil
-            self.sendUpdate(completed)
+            self.finishPackageOperation(completed, requestID: requestID)
           }
         }
       } catch {
         DispatchQueue.main.async {
-          if self.updatePreparing {
-            guard self.finishPreparation(requestID) else { return }
-          } else {
-            self.updateRequestID = nil
-          }
-          self.operationPhase = .idle
-          self.sendUpdate([
-            "kind": "error", "message": error.localizedDescription, "requestID": requestID,
-          ])
+          guard self.finishPackageOperation([
+            "kind": "error", "message": error.localizedDescription,
+          ], requestID: requestID) else { return }
         }
       }
     }
@@ -221,6 +215,22 @@ extension DesktopApp {
     }
     return true
   }
+  /// Complete only the operation that still owns the native state, on the main queue.
+  @discardableResult
+  func finishPackageOperation(_ event: Record, requestID: String) -> Bool {
+    guard updateRequestID == requestID else { return false }
+    if updatePreparing, !finishPreparation(requestID) { return false }
+    operationPhase = .idle
+    operationPlan = nil
+    preparationControl = nil
+    cancelledPreparationRequestID = nil
+    updateRequestID = nil
+    var completed = event
+    completed["requestID"] = requestID
+    sendUpdate(completed)
+    return true
+  }
+
   func runningApps(for packages: [UpgradePackage]) -> [String] {
     let names = NSWorkspace.shared.runningApplications.compactMap { app -> String? in
       guard let url = app.bundleURL,

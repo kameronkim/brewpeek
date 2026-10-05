@@ -126,21 +126,14 @@ extension DesktopApp {
           }
           let completed = result
           DispatchQueue.main.async {
-            self.operationPhase = .idle
-            self.updateRequestID = nil
-            self.sendUpdate(completed)
+            self.finishPackageOperation(completed, requestID: requestID)
           }
         }
       } catch {
         DispatchQueue.main.async {
-          if self.updatePreparing {
-            guard self.finishPreparation(requestID) else { return }
-          }
-          self.operationPhase = .idle
-          self.updateRequestID = nil
-          self.sendUpdate([
-            "kind": "error", "message": error.localizedDescription, "requestID": requestID,
-          ])
+          guard self.finishPackageOperation([
+            "kind": "error", "message": error.localizedDescription,
+          ], requestID: requestID) else { return }
           self.recoveryChecked = false
           self.restorePendingRemoval()
         }
@@ -269,19 +262,14 @@ extension DesktopApp {
           result["requestID"] = requestID
           let completed = result
           DispatchQueue.main.async {
-            self.operationPhase = .idle
-            self.updateRequestID = nil
-            self.sendUpdate(completed)
+            self.finishPackageOperation(completed, requestID: requestID)
           }
         }
       } catch {
         DispatchQueue.main.async {
-          if self.updatePreparing { guard self.finishPreparation(requestID) else { return } }
-          self.operationPhase = .idle
-          self.updateRequestID = nil
-          self.sendUpdate([
-            "kind": "error", "message": error.localizedDescription, "requestID": requestID,
-          ])
+          guard self.finishPackageOperation([
+            "kind": "error", "message": error.localizedDescription,
+          ], requestID: requestID) else { return }
           self.recoveryChecked = false
           self.restorePendingRemoval()
         }
