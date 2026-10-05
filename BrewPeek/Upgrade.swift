@@ -67,7 +67,7 @@ final class UpgradePreparation {
 }
 
 /// Keep recent activity in a byte-bounded buffer without splitting a UTF-8 scalar.
-private struct UpdateLogBuffer {
+struct UpdateLogBuffer {
   private static let byteLimit = 1_000_000
   private var bytes = Data()
   var isEmpty: Bool { bytes.isEmpty }
@@ -86,6 +86,7 @@ private struct UpdateLogBuffer {
 /// All commands run off the main thread. Arguments come from Homebrew metadata, never shell text.
 final class Upgrade {
   let inventory: Inventory
+  private var caskroom: String?
   init(brew: String) { inventory = Inventory(brew: brew) }
   static func validName(_ name: String) -> Bool {
     name.range(
@@ -108,15 +109,33 @@ final class Upgrade {
     return env
   }
   /// File-backed output lets cancellation interrupt silent commands without waiting for pipe EOF.
-  /// Only info and upgrade --dry-run are accepted; mutating execution uses command() instead.
-  func readOnly(_ arguments: [String], control: UpgradePreparation, combinedOutput: Bool = false)
+  /// Only metadata queries and upgrade --dry-run are accepted; mutations use command() instead.
+  func readOnly(
+    _ arguments: [String], control: UpgradePreparation, combinedOutput: Bool = false,
+    environmentOverrides: [String: String] = [:]
+  )
     throws -> String
   {
     guard
-      arguments.first == "info" || (arguments.first == "upgrade" && arguments.contains("--dry-run"))
+      arguments.first == "info" || arguments == ["--caskroom"]
+        || (arguments.first == "upgrade" && arguments.contains("--dry-run"))
     else {
       throw InventoryError(message: "Invalid preparation command.")
     }
+    return try runPreparation(
+      arguments, control: control, combinedOutput: combinedOutput,
+      environmentOverrides: environmentOverrides)
+  }
+  /// Called only with the bundled read-only dependency projection, never with web-provided code.
+  func dependencyProjection(_ script: String, control: UpgradePreparation) throws -> String {
+    try runPreparation(
+      ["ruby", "-e", script], control: control,
+      environmentOverrides: ["HOMEBREW_DEV_CMD_RUN": "1"])
+  }
+  private func runPreparation(
+    _ arguments: [String], control: UpgradePreparation,
+    combinedOutput: Bool = false, environmentOverrides: [String: String] = [:]
+  ) throws -> String {
     try control.check()
     let fm = FileManager.default
     let dir = fm.temporaryDirectory.appendingPathComponent("brewpeek-prepare-" + UUID().uuidString)
@@ -135,7 +154,8 @@ final class Upgrade {
     let task = Process()
     task.executableURL = URL(fileURLWithPath: inventory.brew)
     task.arguments = arguments
-    task.environment = commandEnvironment()
+    task.environment = commandEnvironment().merging(environmentOverrides) { _, override in override
+    }
     task.standardInput = FileHandle.nullDevice
     task.standardOutput = out
     task.standardError = combinedOutput ? out : err
@@ -167,14 +187,49 @@ final class Upgrade {
     }
     return output
   }
-  func command(_ arguments: [String], streaming: ((String) -> Void)? = nil) throws -> (
+  func command(
+    _ arguments: [String], environmentOverrides: [String: String] = [:],
+    streaming: ((String) -> Void)? = nil
+  ) throws -> (
     Int32, String
   ) {
     let task = Process()
     let pipe = Pipe()
     task.executableURL = URL(fileURLWithPath: inventory.brew)
     task.arguments = arguments
-    task.environment = commandEnvironment()
+    var environment = commandEnvironment().merging(environmentOverrides) { _, override in override
+    }
+    var authenticationDirectory: URL?
+    defer {
+      if let directory = authenticationDirectory { try? FileManager.default.removeItem(at: directory) }
+    }
+    // Homebrew sanitizes arbitrary environment variables; the private askpass link identifies
+    // this one confirmed operation. The request file contains no credentials.
+    if ["upgrade", "uninstall"].contains(arguments.first ?? ""),
+      !arguments.contains("--dry-run"), let executable = Bundle.main.executableURL
+    {
+      let helper = executable.deletingLastPathComponent().appendingPathComponent("BrewPeekAskpass")
+      if FileManager.default.isExecutableFile(atPath: helper.path) {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+          "brewpeek-auth-" + UUID().uuidString)
+        try FileManager.default.createDirectory(
+          at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        authenticationDirectory = directory
+        var info = proc_bsdinfo()
+        guard proc_pidinfo(getpid(), PROC_PIDTBSDINFO, 0, &info,
+          Int32(MemoryLayout<proc_bsdinfo>.size)) == Int32(MemoryLayout<proc_bsdinfo>.size)
+        else { throw InventoryError(message: "Could not prepare administrator authentication.") }
+        let request: Record = ["pid": getpid(), "started": info.pbi_start_tvsec,
+          "microseconds": info.pbi_start_tvusec, "operation": arguments.joined(separator: " ")]
+        let file = directory.appendingPathComponent("request.json")
+        try JSONSerialization.data(withJSONObject: request).write(to: file, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        let link = directory.appendingPathComponent("askpass")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: helper)
+        environment["SUDO_ASKPASS"] = link.path
+      }
+    }
+    task.environment = environment
     task.standardInput = FileHandle.nullDevice
     task.standardOutput = pipe
     task.standardError = pipe
@@ -211,6 +266,11 @@ final class Upgrade {
       streaming?(line)
     }
     task.waitUntilExit()
+    if let directory = authenticationDirectory,
+      FileManager.default.fileExists(atPath: directory.appendingPathComponent("cancelled").path)
+    {
+      output.append("\nAdministrator authentication cancelled. Retry when ready.\n")
+    }
     try? pipe.fileHandleForReading.close()
     return (task.terminationStatus, output.text)
   }
@@ -223,7 +283,7 @@ final class Upgrade {
     }
     return object
   }
-  static func packages(_ info: Record) -> [UpgradePackage] {
+  static func packages(_ info: Record, caskroom: String? = nil) -> [UpgradePackage] {
     var result: [UpgradePackage] = []
     for f in info["formulae"] as? [Record] ?? [] {
       guard let name = f["name"] as? String else { continue }
@@ -251,9 +311,7 @@ final class Upgrade {
       guard let name = c["token"] as? String else { continue }
       let full = c["full_token"] as? String ?? name
       let versions = c["installed"] as? [String] ?? (c["installed"] as? String).map { [$0] } ?? []
-      let apps = (c["artifacts"] as? [Record] ?? []).compactMap {
-        ($0["app"] as? [Any])?.first as? String
-      }
+      let apps = CaskApps.paths(c, caskroom: caskroom)
       let dependencies = c["depends_on"] as? Record ?? [:]
       let dependencyIDs = ["formula", "cask"].flatMap { type in
         (dependencies[type] as? [String] ?? []).map { relationshipID($0, type: type) }
@@ -304,8 +362,23 @@ final class Upgrade {
       return package
     }
   }
+  /// Share installed app path resolution with update and uninstall preparation.
+  func resolvedPackages(_ info: Record, control: UpgradePreparation? = nil) throws
+    -> [UpgradePackage]
+  {
+    if caskroom == nil, (info["casks"] as? [Record] ?? []).contains(where: CaskApps.needsAppDirectory) {
+      let path = try control.map { try readOnly(["--caskroom"], control: $0) }
+        ?? inventory.run(inventory.brew, ["--caskroom"])
+      let directory = path.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard directory.hasPrefix("/") else {
+        throw InventoryError(message: "Could not resolve Homebrew's Caskroom path.")
+      }
+      caskroom = directory
+    }
+    return Self.packages(info, caskroom: caskroom)
+  }
   func installed(control: UpgradePreparation? = nil) throws -> [UpgradePackage] {
-    Self.packages(try json(["info", "--json=v2", "--installed"], control: control))
+    try resolvedPackages(json(["info", "--json=v2", "--installed"], control: control), control: control)
   }
   /// Read only recognized plan blocks, then resolve every name through Homebrew JSON.
   static func plannedNames(_ text: String) throws -> [String] {
@@ -396,7 +469,7 @@ final class Upgrade {
       return matches.isEmpty ? [name] : matches.map(\.argument)
     }
     let metadata = try json(["info", "--json=v2"] + arguments, control: control)
-    var packages = Self.packages(metadata)
+    var packages = try resolvedPackages(metadata, control: control)
     guard !packages.isEmpty,
       packages.allSatisfy({ Self.validName($0.fullName) && !$0.next.isEmpty })
     else {
@@ -572,12 +645,15 @@ final class Upgrade {
       } else if result.0 == 0 {
         outcome = "attention"
         message = "Expected installed version could not be verified"
+      } else if result.1.contains("Administrator authentication cancelled.") {
+        outcome = "attention"
+        message = "Authentication cancelled. Retry when ready."
       } else if result.1.localizedCaseInsensitiveContains("sudo")
         || result.1.localizedCaseInsensitiveContains("permission")
         || result.1.localizedCaseInsensitiveContains("password")
       {
         outcome = "attention"
-        message = "May require administrator permission. Review activity and use Terminal."
+        message = "Administrator authentication did not complete. Review activity and retry."
       } else {
         outcome = touched.contains(p.id) ? "failed" : "skipped"
         message =

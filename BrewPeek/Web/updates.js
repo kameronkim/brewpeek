@@ -1,9 +1,11 @@
-// Native Homebrew updates. No package changes are simulated in this bundle.
+// Native Homebrew package operations. No package changes are simulated in this bundle.
 let updateMode = 'ready',
   updatePlan = null,
   requestedKeys = [],
   previousResult = null;
 let activeRequest = null;
+let operationKind = 'update';
+let cleanupTaskID = null;
 let processedPackages = 0;
 let popupScroll = null,
   activity = [],
@@ -16,7 +18,7 @@ let popupReturnFocus = null;
 let pendingCancelFocus = null;
 let operationScrollPending = false;
 const updateBusy = () =>
-  ['checking', 'cancelling', 'running', 'verifying', 'confirming'].includes(updateMode);
+  ['checking', 'cancelling', 'running', 'verifying', 'confirming', 'recovering'].includes(updateMode);
 const postUpdate = (message) => window.webkit.messageHandlers.packageUpdate.postMessage(message);
 const bulk = document.createElement('button');
 bulk.className = 'update-btn bulk';
@@ -35,7 +37,7 @@ function syncActionAvailability() {
   bulk.disabled = unavailable;
   $('refresh').disabled = updateBusy() || inventoryRefreshState === 'refreshing';
   document
-    .querySelectorAll('[data-update], [data-retry], #retry-check, #retry-plan')
+    .querySelectorAll('[data-update], [data-uninstall], [data-version-cleanup], [data-retry], #retry-check, #retry-plan, #retry-cleanup, #discard-cleanup')
     .forEach((b) => (b.disabled = unavailable));
 }
 function setUpdateMode(mode) {
@@ -88,7 +90,7 @@ for (const dialog of document.querySelectorAll('dialog')) {
   dialog.addEventListener('close', unlockBackground);
   dialog.addEventListener('keydown', (event) => {
     if (event.key !== 'Tab' || event.altKey || event.ctrlKey || event.metaKey) return;
-    const buttons = [...dialog.querySelectorAll('button:not(:disabled)')].filter(
+    const buttons = [...dialog.querySelectorAll('button:not(:disabled), input:not(:disabled)')].filter(
       (button) => button.getClientRects().length
     );
     if (!buttons.length) return;
@@ -115,16 +117,23 @@ $('notice').addEventListener('close', () => {
   if ($('notice').open) return;
   for (const id of ['notice-title', 'notice-copy', 'notice-command']) $(id).textContent = '';
 });
-function checkChanges(keys, trigger = document.activeElement) {
+function checkChanges(keys, trigger = document.activeElement, operation = 'update') {
   if (updateBusy() || inventoryRefreshState !== 'idle' || !keys.length) return;
   if (!popupScroll) popupReturnFocus = captureInventoryFocus(trigger);
+  operationKind = operation;
   requestedKeys = keys;
   activeRequest = crypto.randomUUID();
   showChecking();
-  postUpdate({ action: 'prepare', keys, requestID: activeRequest });
+  postUpdate({ action: operationKind === 'version-cleanup' ? 'prepareVersions' : operationKind === 'uninstall' ? 'prepareUninstall' : 'prepare', keys, requestID: activeRequest });
 }
 function setConfirmState(mode) {
   delete $('confirm').dataset.issue;
+  $('confirm').dataset.operation = operationKind;
+  document.querySelector('.confirm-heading .eyebrow').textContent = operationKind === 'version-cleanup' ? 'VERSION CLEANUP' : operationKind.startsWith('cleanup') ? 'DEPENDENCY CLEANUP' : operationKind === 'uninstall' ? 'PACKAGE UNINSTALL' : 'PACKAGE UPDATE';
+  $('start').disabled = false;
+  $('start').textContent = operationKind === 'uninstall' ? 'Uninstall' : 'Update';
+  document.querySelector('.confirm-bottom > p').textContent = operationKind === 'uninstall' ? 'Settings and support files may remain.' : 'Homebrew may also update related packages.';
+  document.querySelector('.confirm-scroll').setAttribute('aria-label', operationKind === 'version-cleanup' ? 'Installed versions' : operationKind.startsWith('cleanup') ? 'Remaining dependencies' : operationKind === 'uninstall' ? 'Packages to uninstall' : 'Packages to update');
   $('confirm').dataset.state = mode;
   document.querySelector('.confirm-scroll').hidden = mode !== 'confirming';
   document.querySelector('.confirm-bottom > p').hidden = mode !== 'confirming';
@@ -139,7 +148,9 @@ function showChecking(message) {
   setUpdateMode('checking');
   $('confirm-title').textContent = message || 'Checking changes…';
   $('confirm-copy').textContent =
-    'Checking selected packages and dependencies. No installation has started.';
+    operationKind === 'version-cleanup' ? 'Checking which old versions Homebrew allows removing. No removal has started.' : operationKind.startsWith('cleanup') ? 'Checking remaining dependencies. No cleanup has started.' : operationKind === 'uninstall'
+      ? 'Checking the installed package and its dependencies. No uninstallation has started.'
+      : 'Checking selected packages and dependencies. No installation has started.';
   setConfirmState('checking');
   $('confirm-title').focus({ preventScroll: true });
 }
@@ -150,26 +161,58 @@ function showCheckError(message, runningApps = []) {
   if (runningApps.length) {
     $('confirm').dataset.issue = 'running-apps';
     $('confirm-title').textContent = 'Close apps to continue';
-    $('confirm-copy').textContent = 'Quit the apps below, then retry the update.';
+    $('confirm-copy').textContent = `Quit the apps below, then retry the ${operationKind === 'uninstall' ? 'uninstall' : 'update'}.`;
     $('confirm-error').innerHTML =
       `<ul class="running-apps" aria-label="Apps to close">${runningApps.map((name) => `<li><strong>${esc(name)}</strong><span>Running</span></li>`).join('')}</ul>`;
   } else {
-    $('confirm-title').textContent = 'Could not check updates';
+    $('confirm-title').textContent = operationKind === 'version-cleanup' ? 'Could not review versions' : operationKind.startsWith('cleanup') ? 'Could not prepare cleanup' : operationKind === 'uninstall' ? 'Could not prepare uninstall' : 'Could not check updates';
     $('confirm-copy').textContent = 'Review the details and try again.';
     $('confirm-error').innerHTML = `<pre>${esc(message)}</pre>`;
   }
   $('retry-plan').focus({ preventScroll: true });
 }
-$('retry-plan').onclick = () => checkChanges(requestedKeys);
+$('retry-plan').onclick = () => operationKind.startsWith('cleanup') ? checkCleanup($('retry-plan')) : checkChanges(requestedKeys, $('retry-plan'), operationKind);
 function showPlan(plan, changed) {
   updatePlan = plan;
+  operationKind = plan.operation || 'update';
   setUpdateMode('confirming');
   setConfirmState('confirming');
+  if (operationKind === 'version-cleanup') {
+    const count = plan.packages.filter(p => p.removable).length;
+    $('confirm-title').textContent = count ? 'Remove old versions?' : 'No versions to remove';
+    $('confirm-copy').textContent = (changed ? 'Installed versions changed. Review them again. ' : '') + 'Choose the versions to remove. Current, linked, pinned, and required versions are kept.';
+    const headers = document.querySelectorAll('.confirm-table th');
+    headers[0].textContent = 'Name'; headers[1].textContent = 'Version'; headers[2].textContent = 'Action';
+    $('confirm-list').innerHTML = plan.packages.map(p => `<tr><td>${p.removable ? `<label class="version-choice"><input type="checkbox" data-remove-version="${esc(p.version)}">${esc(p.name)}</label>` : esc(p.name)}<small class="dependency-note">${esc(p.reason)}</small></td><td>${esc(p.version)}</td><td>${p.removable ? 'Remove' : 'Keep'}</td></tr>`).join('');
+    $('start').textContent = 'Remove selected versions';
+    $('start').disabled = true;
+    $('confirm-list').onchange = () => { $('start').disabled = !$('confirm-list').querySelector('[data-remove-version]:checked'); };
+    document.querySelector('.confirm-bottom > p').textContent = 'Only selected old versions are removed. Package caches and dependencies are kept.';
+    document.querySelector('.confirm-scroll').scrollTop = 0;
+    $('confirm-title').focus({preventScroll: true});
+    return;
+  }
+  $('confirm-list').onchange = null;
+  document.querySelector('.confirm-table th:nth-child(2)').textContent = 'Current';
+  const cleanup = operationKind === 'cleanup';
+  document.querySelector('.confirm-table th:nth-child(3)').textContent = cleanup ? 'Status' : 'New';
+  if (cleanup) {
+    $('confirm-title').textContent = plan.packages.length ? 'Remove remaining dependencies?' : 'No dependencies to remove';
+    $('confirm-copy').textContent = (changed ? 'The plan changed. Review it before continuing. ' : '') + `${plan.rootName} is already uninstalled. ${plan.packages.length} unused ${plan.packages.length === 1 ? 'dependency is' : 'dependencies are'} ready to remove.`;
+    $('confirm-list').innerHTML = [...plan.packages, ...(plan.kept || [])].map(p => `<tr><td>${esc(p.name)}<small class="dependency-note">${esc(p.message || p.relationship || p.reason)}</small></td><td>${esc(p.version)}</td><td>${esc(p.status)}</td></tr>`).join('');
+    $('start').textContent = plan.packages.length ? 'Remove dependencies' : 'Finish review';
+    document.querySelector('.confirm-bottom > p').textContent = 'Shared, directly installed, pinned, and changed installations are kept.';
+    document.querySelector('.confirm-scroll').scrollTop = 0;
+    $('confirm-title').focus({ preventScroll: true });
+    return;
+  }
   $('confirm-title').textContent =
-    plan.selectedCount === 1 ? 'Update package?' : `Update ${plan.selectedCount} packages?`;
+    operationKind === 'uninstall'
+      ? `Uninstall ${plan.packages[0].name}?`
+      : plan.selectedCount === 1 ? 'Update package?' : `Update ${plan.selectedCount} packages?`;
   $('confirm-copy').textContent =
     (changed ? 'The plan changed. Review it before continuing. ' : '') +
-    `${plan.selectedCount} selected · ${plan.packages.length - plan.selectedCount} additional changes.` +
+    (operationKind === 'uninstall' ? `Homebrew will uninstall this ${plan.packages[0].type === 'cask' ? 'Cask' : 'Formula'}${plan.packages.length > 1 ? ` and remove ${plan.packages.length - 1} unused ${plan.packages.length === 2 ? 'dependency' : 'dependencies'}` : ''}. ${plan.packages[0].type === 'formula' && plan.packages[0].installedVersions?.length > 1 ? 'All installed versions of this Formula will be removed. ' : ''}Shared and directly installed dependencies are kept.` : `${plan.selectedCount} selected · ${plan.packages.length - plan.selectedCount} additional changes.`) +
     (plan.excluded?.length ? ` Homebrew excluded: ${plan.excluded.join(', ')}.` : '');
   $('confirm-list').innerHTML = plan.packages
     .map(
@@ -214,17 +257,18 @@ $('confirm').addEventListener('keydown', (event) => {
 $('start').onclick = () => {
   const token = updatePlan?.token;
   if (!token) return;
+  const versions = [...$('confirm-list').querySelectorAll('[data-remove-version]:checked')].map(input => input.dataset.removeVersion);
   activeRequest = crypto.randomUUID();
   showChecking('Rechecking the confirmed plan…');
-  postUpdate({ action: 'start', token, requestID: activeRequest });
+  postUpdate({ action: operationKind === 'version-cleanup' ? 'startVersions' : operationKind === 'cleanup-discard' ? 'discardCleanup' : operationKind === 'cleanup' ? 'startCleanup' : operationKind === 'uninstall' ? 'startUninstall' : 'start', token, versions, recoveryID: cleanupTaskID, requestID: activeRequest });
 };
 $('packages').addEventListener(
   'click',
   (event) => {
-    const button = event.target.closest('[data-update]');
+    const button = event.target.closest('[data-update], [data-uninstall], [data-version-cleanup]');
     if (!button) return;
     event.stopImmediatePropagation();
-    checkChanges([button.dataset.update], button);
+    checkChanges([button.dataset.versionCleanup || button.dataset.uninstall || button.dataset.update], button, button.hasAttribute('data-version-cleanup') ? 'version-cleanup' : button.hasAttribute('data-uninstall') ? 'uninstall' : 'update');
   },
   true
 );
@@ -269,11 +313,12 @@ function clearProgressData() {
 }
 function beginProgress(plan) {
   previousResult = null;
+  operationKind = plan.operation || 'update';
   clearProgressData();
   progressPackages = plan.packages;
   setUpdateMode('running');
   $('operation').innerHTML =
-    `<section class="operation"><div class="operation-top"><div><div class="eyebrow" id="operation-phase">UPDATE IN PROGRESS</div><h3><span class="pulse"></span><span id="operation-title">Updating packages</span></h3><p id="operation-copy">Homebrew controls parallel downloads and installation order.</p></div></div><div class="progress-summary"><span>Packages processed · including dependencies</span><span id="processed">0 of ${progressPackages.length}</span></div><div class="progress-track"><div class="progress-fill" id="overall-fill"></div></div><p id="discovered" hidden>Additional related changes detected. The total includes these packages.</p><details id="progress-items"><summary id="progress-count"></summary><div class="bounded-list" id="progress-rows"></div></details><details id="progress-log"><summary>Show activity</summary><pre id="activity-log"></pre></details></section>`;
+    `<section class="operation" data-operation="${operationKind}"><div class="operation-top"><div><div class="eyebrow" id="operation-phase">${operationKind === 'version-cleanup' ? 'VERSION CLEANUP IN PROGRESS' : operationKind === 'cleanup' ? 'CLEANUP IN PROGRESS' : operationKind === 'uninstall' ? 'UNINSTALL IN PROGRESS' : 'UPDATE IN PROGRESS'}</div><h3><span class="pulse"></span><span id="operation-title">${operationKind === 'version-cleanup' ? 'Removing old versions' : operationKind === 'cleanup' ? 'Removing unused dependencies' : operationKind === 'uninstall' ? `Uninstalling ${esc(plan.packages[0].name)}` : 'Updating packages'}</span></h3><p id="operation-copy">${operationKind === 'version-cleanup' ? 'Homebrew is removing only the selected old versions.' : operationKind === 'cleanup' ? 'Homebrew is removing the confirmed remaining dependencies.' : operationKind === 'uninstall' ? 'Homebrew is removing the selected package and any confirmed unused dependencies.' : 'Homebrew controls parallel downloads and installation order.'}</p></div></div><div class="progress-summary"><span>Packages processed · including dependencies</span><span id="processed">0 of ${progressPackages.length}</span></div><div class="progress-track"><div class="progress-fill" id="overall-fill"></div></div><p id="discovered" hidden>Additional related changes detected. The total includes these packages.</p><details id="progress-items"><summary id="progress-count"></summary><div class="bounded-list" id="progress-rows"></div></details><details id="progress-log"><summary>Show activity</summary><pre id="activity-log"></pre></details></section>`;
   $('progress-items').ontoggle = () => paintProgress();
   $('progress-log').ontoggle = paintActivity;
   paintProgress(0);
@@ -313,8 +358,8 @@ function paintProgress(processed = processedPackages) {
     setProgressText(row.querySelector('.dependency-note'), p.relationship || p.reason);
     const text =
       updateMode === 'verifying'
-        ? 'Verifying installed version…'
-        : progressStates[p.id] || 'Waiting for Homebrew';
+        ? (['uninstall', 'cleanup', 'version-cleanup'].includes(operationKind) ? 'Verifying package registration…' : 'Verifying installed version…')
+        : progressStates[p.id] || (['uninstall', 'cleanup', 'version-cleanup'].includes(operationKind) ? 'Uninstalling…' : 'Waiting for Homebrew');
     const fill = row.querySelector('.progress-fill');
     if (setProgressText(row.querySelector('.download-state'), text) || !fill.style.width) {
       row
@@ -328,14 +373,21 @@ function paintProgress(processed = processedPackages) {
   }
 }
 function paintResult(result) {
+  const uninstall = result.operation === 'uninstall';
+  const versions = result.operation === 'version-cleanup';
+  if (result.recoveryID) cleanupTaskID = result.recoveryID;
+  const pending = !!result.pendingCleanup;
+  const recoveryTitle = result.recovered ? (pending ? 'Unfinished cleanup' : result.recoveryID ? 'Unfinished uninstall' : 'Cleanup complete') : null;
   const counts = {};
   result.packages.forEach((p) => (counts[p.outcome] = (counts[p.outcome] || 0) + 1));
   const summary = Object.entries(counts)
     .map(([type, count]) => `${count} ${type === 'attention' ? 'need attention' : type}`)
     .join(' · ');
-  const issues = result.packages.filter((p) => !['updated', 'installed'].includes(p.outcome));
+  const issues = result.packages.filter((p) => !['updated', 'installed', 'uninstalled', 'kept', 'removed'].includes(p.outcome));
   $('operation').innerHTML =
-    `<section class="operation"><div class="operation-top"><div><div class="eyebrow">UPDATE RESULTS</div><h3>${esc(summary)}</h3><p>${result.verified ? 'Installed versions checked.' : 'Installed versions could not be checked.'}${result.refreshError ? ' Inventory refresh failed; use Refresh to try again.' : ''}</p></div><button class="subtle-btn" id="dismiss">Close results</button></div>${issues.length ? `<div class="issues">${issues.map((p) => `<div class="issue-item"><div><strong>${esc(p.name)}</strong><p>${esc(p.message)}</p></div><button class="subtle-btn" data-retry="${esc(p.id)}">Retry</button></div>`).join('')}</div>` : ''}<details><summary>All results · ${result.packages.length}</summary><ul class="result-list bounded-list">${result.packages.map((p) => `<li>${esc(p.name)}<span>${esc(p.message)}<small class="dependency-note">Installed: ${esc(p.actualVersion)}</small></span></li>`).join('')}</ul></details><details><summary>Show activity</summary><pre>${esc(result.details || '')}${result.refreshError ? '\n' + esc(result.refreshError) : ''}</pre></details>${issues.length && result.command ? '<div class="dialog-actions"><button class="subtle-btn" id="terminal-help">View Terminal command</button></div>' : ''}</section>`;
+    `<section class="operation"><div class="operation-top"><div><div class="eyebrow">${versions ? 'VERSION CLEANUP RESULTS' : uninstall ? 'UNINSTALL RESULTS' : 'UPDATE RESULTS'}</div><h3>${esc(recoveryTitle || summary)}</h3><p>${versions ? (result.verified ? 'Installed versions checked.' : 'Installed versions could not be checked.') : uninstall ? (result.verified ? 'Homebrew package registrations checked.' : 'Package registrations could not be checked.') : (result.verified ? 'Installed versions checked.' : 'Installed versions could not be checked.')}${result.refreshError ? ' Inventory refresh failed; use Refresh to try again.' : ''}</p></div><button class="subtle-btn" id="dismiss">Close results</button></div>${result.recovered ? '<p>Current Homebrew registrations checked. Nothing has resumed automatically.</p>' : ''}${result.recoveryID ? `<div class="dialog-actions recovery-actions">${pending ? '<button class="subtle-btn" id="retry-cleanup">Retry cleanup</button>' : ''}<button class="subtle-btn" id="discard-cleanup">Discard pending cleanup</button></div>${pending ? '<p>Remaining dependencies are checked again before removal. The task stays saved if the app closes.</p>' : ''}` : ''}${issues.length ? `<div class="issues">${issues.map((p) => `<div class="issue-item"><div><strong>${esc(p.name)}</strong><p>${esc(p.message)}</p></div>${!uninstall || (p.id === result.packages[0].id && p.actualVersion !== 'Not installed') ? `<button class="subtle-btn" data-retry="${esc(p.id)}">Retry</button>` : ''}</div>`).join('')}</div>` : ''}<details><summary>All results · ${result.packages.length}</summary><ul class="result-list bounded-list">${result.packages.map((p) => `<li>${esc(p.name)}<span>${esc(p.message)}<small class="dependency-note">${versions ? 'Version' : uninstall ? 'Registration' : 'Installed'}: ${esc(p.actualVersion)}</small></span></li>`).join('')}</ul></details><details><summary>Show activity</summary><pre>${esc(result.details || '')}${result.refreshError ? '\n' + esc(result.refreshError) : ''}</pre></details>${issues.length && result.command ? '<div class="dialog-actions"><button class="subtle-btn" id="terminal-help">View Terminal command</button></div>' : ''}</section>`;
+  if ($('retry-cleanup')) $('retry-cleanup').onclick = () => checkCleanup($('retry-cleanup'));
+  if ($('discard-cleanup')) $('discard-cleanup').onclick = () => confirmDiscardCleanup($('discard-cleanup'));
   $('dismiss').onclick = () => {
     const view = captureInventoryView();
     previousResult = null;
@@ -348,8 +400,8 @@ function paintResult(result) {
   document.querySelectorAll('[data-retry]').forEach(
     (button) =>
       (button.onclick = () => {
-        const item = allPackages.find((p) => key(p) === button.dataset.retry && p.availableVersion);
-        checkChanges(item ? [key(item)] : result.retryKeys || requestedKeys, button);
+        const item = allPackages.find((p) => key(p) === button.dataset.retry && (uninstall ? p.id === result.packages[0].id : p.availableVersion));
+        checkChanges(item ? [key(item)] : result.retryKeys || requestedKeys, button, versions ? 'version-cleanup' : uninstall ? 'uninstall' : 'update');
       })
   );
   if ($('terminal-help'))
@@ -364,7 +416,27 @@ window.receiveUpdate = function (event) {
   if (event.requestID && event.requestID !== activeRequest) return;
   if (updateMode === 'cancelling' && ['checking', 'plan', 'error'].includes(event.kind)) return;
   switch (event.kind) {
+    case 'recoveryChecking':
+      setUpdateMode('recovering');
+      break;
+    case 'recoveryEmpty':
+      setUpdateMode(previousResult ? 'result' : 'ready');
+      break;
+    case 'recoveryError':
+      setUpdateMode(previousResult ? 'result' : 'ready');
+      showNotice('Could not restore cleanup', event.message);
+      break;
+    case 'cleanupDiscarded':
+      $('confirm').close();
+      updatePlan = null; activeRequest = null; cleanupTaskID = null;
+      if (previousResult) {
+        delete previousResult.recoveryID; delete previousResult.pendingCleanup; delete previousResult.recovered;
+        paintResult(previousResult);
+      }
+      setUpdateMode(previousResult ? 'result' : 'ready');
+      break;
     case 'checking':
+      if (event.operation) operationKind = event.operation;
       showChecking(event.message);
       break;
     case 'plan':
@@ -397,8 +469,8 @@ window.receiveUpdate = function (event) {
     case 'verifying':
       setUpdateMode('verifying');
       $('operation-phase').textContent = 'VERIFYING RESULTS';
-      $('operation-title').textContent = 'Checking installed versions';
-      $('operation-copy').textContent = 'Confirming actual versions before reporting success.';
+      $('operation-title').textContent = ['uninstall', 'cleanup', 'version-cleanup'].includes(operationKind) ? 'Checking package registrations' : 'Checking installed versions';
+      $('operation-copy').textContent = ['uninstall', 'cleanup', 'version-cleanup'].includes(operationKind) ? 'Confirming removal before reporting success.' : 'Confirming actual versions before reporting success.';
       paintProgress();
       break;
     case 'result': {
@@ -415,7 +487,7 @@ window.receiveUpdate = function (event) {
       restoreInventoryView(view);
       syncActionAvailability();
       finishNotice();
-      scrollOperationIntoView();
+      if (!result.recovered) scrollOperationIntoView();
       break;
     }
     case 'error':
@@ -430,10 +502,10 @@ window.receiveUpdate = function (event) {
       if (previousResult) paintResult(previousResult);
       else
         $('operation').innerHTML =
-          `<section class="operation"><div class="eyebrow">UPDATE UNAVAILABLE</div><h3>Could not complete the operation</h3><p>Review the details and try again.</p><details open><summary>Details</summary><pre>${esc(event.message)}</pre></details><div class="dialog-actions"><button class="subtle-btn" id="retry-check">Retry check</button></div></section>`;
+          `<section class="operation"><div class="eyebrow">${operationKind === 'uninstall' ? 'UNINSTALL UNAVAILABLE' : 'UPDATE UNAVAILABLE'}</div><h3>Could not complete the operation</h3><p>Review the details and try again.</p><details open><summary>Details</summary><pre>${esc(event.message)}</pre></details><div class="dialog-actions"><button class="subtle-btn" id="retry-check">Retry check</button></div></section>`;
       if ($('retry-check'))
-        $('retry-check').onclick = () => checkChanges(requestedKeys, $('retry-check'));
-      if (previousResult) showNotice('Could not check updates', event.message);
+        $('retry-check').onclick = () => operationKind.startsWith('cleanup') ? checkCleanup($('retry-check')) : checkChanges(requestedKeys, $('retry-check'), operationKind);
+      if (previousResult) showNotice(operationKind === 'uninstall' ? 'Could not uninstall package' : 'Could not check updates', event.message);
       finishNotice();
       break;
     case 'closeBlocked':
@@ -447,4 +519,26 @@ function finishNotice() {
     $('notice-copy').textContent =
       'Homebrew is no longer running. You can close BrewPeek or review the results.';
   }
+}
+
+function checkCleanup(trigger = document.activeElement) {
+  if (!cleanupTaskID || updateBusy() || inventoryRefreshState !== 'idle') return;
+  if (!popupScroll) popupReturnFocus = captureInventoryFocus(trigger);
+  operationKind = 'cleanup'; requestedKeys = [];
+  activeRequest = crypto.randomUUID();
+  showChecking('Checking remaining dependencies…');
+  postUpdate({action: 'prepareCleanup', recoveryID: cleanupTaskID, requestID: activeRequest});
+}
+function confirmDiscardCleanup(trigger) {
+  if (!cleanupTaskID || updateBusy()) return;
+  if (!popupScroll) popupReturnFocus = captureInventoryFocus(trigger);
+  operationKind = 'cleanup-discard';
+  updatePlan = {token: cleanupTaskID};
+  setUpdateMode('confirming'); setConfirmState('confirming');
+  $('confirm-title').textContent = 'Discard pending cleanup?';
+  $('confirm-copy').textContent = 'This removes the saved cleanup task. Installed packages stay on this Mac.';
+  document.querySelector('.confirm-scroll').hidden = true;
+  document.querySelector('.confirm-bottom > p').hidden = true;
+  $('start').textContent = 'Discard task';
+  $('confirm-title').focus({preventScroll: true});
 }

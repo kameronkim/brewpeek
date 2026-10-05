@@ -2,7 +2,7 @@ import Cocoa
 import WebKit
 
 extension DesktopApp {
-  private func sendUpdate(_ event: Record) {
+  func sendUpdate(_ event: Record) {
     web.callAsyncJavaScript(
       "window.receiveUpdate(event)", arguments: ["event": event], in: nil, in: .page
     ) { result in
@@ -20,6 +20,35 @@ extension DesktopApp {
     guard !busy else { return }
 
     switch action {
+    case "prepareVersions":
+      guard let keys = request["keys"] as? [String], keys.count == 1 else { return }
+      prepareVersionCleanup(
+        key: keys[0], requestID: request["requestID"] as? String ?? UUID().uuidString)
+    case "startVersions":
+      guard let token = request["token"] as? String, let plan = versionCleanupPlan,
+        token == plan.token, let selected = request["versions"] as? [String]
+      else { return }
+      startVersionCleanup(
+        plan, selected: selected, requestID: request["requestID"] as? String ?? UUID().uuidString)
+    case "prepareCleanup":
+      guard let id = request["recoveryID"] as? String else { return }
+      prepareSavedCleanup(id: id, requestID: request["requestID"] as? String ?? UUID().uuidString)
+    case "startCleanup":
+      guard let token = request["token"] as? String, let plan = cleanupPlan, token == plan.token
+      else { return }
+      startSavedCleanup(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
+    case "discardCleanup":
+      guard let id = request["recoveryID"] as? String else { return }
+      discardSavedCleanup(id: id, requestID: request["requestID"] as? String ?? UUID().uuidString)
+    case "prepareUninstall":
+      guard let keys = request["keys"] as? [String], keys.count == 1 else { return }
+      preparePackageRemoval(
+        key: keys[0], requestID: request["requestID"] as? String ?? UUID().uuidString)
+    case "startUninstall":
+      guard let token = request["token"] as? String,
+        let plan = removalPlan, token == plan.token
+      else { return }
+      startPackageRemoval(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "prepare":
       guard let keys = request["keys"] as? [String], !keys.isEmpty else { return }
       prepareUpdate(keys: keys, requestID: request["requestID"] as? String ?? UUID().uuidString)
@@ -37,10 +66,16 @@ extension DesktopApp {
     if updatePreparing {
       updateRequestID = nil
       updatePlan = nil
+      removalPlan = nil
+      cleanupPlan = nil
+      versionCleanupPlan = nil
       preparationControl?.cancel()
     } else if !busy {
       updateRequestID = nil
       updatePlan = nil
+      removalPlan = nil
+      cleanupPlan = nil
+      versionCleanupPlan = nil
       sendUpdate(["kind": "cancelled"])
     }
   }
@@ -51,6 +86,9 @@ extension DesktopApp {
     updatePreparing = true
     updateRequestID = requestID
     updatePlan = nil
+    removalPlan = nil
+    cleanupPlan = nil
+    versionCleanupPlan = nil
     sendUpdate(["kind": "checking", "requestID": requestID])
     let destination = output
     let control = UpgradePreparation()
@@ -79,18 +117,7 @@ extension DesktopApp {
 
   private func startUpdate(_ plan: UpgradePlan, requestID: String) {
     updateRequestID = requestID
-    let running = NSWorkspace.shared.runningApplications
-    let active = running.compactMap { app -> String? in
-      guard let url = app.bundleURL,
-        plan.packages.contains(where: { p in
-          p.type == "cask"
-            && p.apps.contains { appPath in
-              URL(fileURLWithPath: appPath).lastPathComponent == url.lastPathComponent
-            }
-        })
-      else { return nil }
-      return app.localizedName ?? url.deletingPathExtension().lastPathComponent
-    }
+    let active = runningApps(for: plan.packages)
     guard active.isEmpty else {
       updatePlan = nil
       sendUpdate([
@@ -125,15 +152,8 @@ extension DesktopApp {
             }
             return
           }
-          let shouldStart = DispatchQueue.main.sync { () -> Bool in
-            guard self.updateRequestID == requestID else {
-              _ = self.finishPreparation(requestID)
-              return false
-            }
-            self.updatePreparing = false
-            self.preparationControl = nil
-            self.sendUpdate(["kind": "started", "plan": fresh.record, "requestID": requestID])
-            return true
+          let shouldStart = DispatchQueue.main.sync {
+            self.beginPreparedUpdate(fresh, requestID: requestID)
           }
           guard shouldStart else { return }
           var result = try engine.execute(fresh) { event in
@@ -179,26 +199,70 @@ extension DesktopApp {
     }
   }
 
+  /// Check the freshly prepared targets on the main queue immediately before mutation.
+  func beginPreparedUpdate(_ plan: UpgradePlan, requestID: String) -> Bool {
+    guard updateRequestID == requestID else {
+      _ = finishPreparation(requestID)
+      return false
+    }
+    let active = runningApps(for: plan.packages)
+    guard active.isEmpty else {
+      guard finishPreparation(requestID) else { return false }
+      sendUpdate([
+        "kind": "error", "runningApps": active, "requestID": requestID,
+        "message": "Close these apps before updating, then retry: "
+          + active.joined(separator: ", "),
+      ])
+      return false
+    }
+    updatePreparing = false
+    preparationControl = nil
+    sendUpdate(["kind": "started", "plan": plan.record, "requestID": requestID])
+    return true
+  }
+
   /// Runs on the main queue, including the final cancellation gate before mutation.
-  private func finishPreparation(_ requestID: String) -> Bool {
+  func finishPreparation(_ requestID: String) -> Bool {
     busy = false
     updatePreparing = false
     updateInProgress = false
     preparationControl = nil
     guard updateRequestID == requestID else {
       updatePlan = nil
+      removalPlan = nil
+      cleanupPlan = nil
+      versionCleanupPlan = nil
       sendUpdate(["kind": "cancelled"])
       return false
     }
     return true
   }
+  func runningApps(for packages: [UpgradePackage]) -> [String] {
+    let names = NSWorkspace.shared.runningApplications.compactMap { app -> String? in
+      guard let url = app.bundleURL,
+        packages.contains(where: { package in
+          package.type == "cask"
+            && package.apps.contains { path in
+              CaskApps.matches(path, running: url)
+            }
+        })
+      else { return nil }
+      return app.localizedName ?? url.deletingPathExtension().lastPathComponent
+    }
+    return Array(Set(names)).sorted()
+  }
   private func permitClose() -> Bool {
-    guard updateInProgress || updatePlan != nil else { return true }
+    guard
+      updateInProgress || updatePlan != nil || removalPlan != nil || cleanupPlan != nil
+        || versionCleanupPlan != nil
+    else {
+      return true
+    }
     sendUpdate([
       "kind": "closeBlocked",
       "message": updateInProgress
-        ? "Keep BrewPeek open until Homebrew finishes. Closing now could interrupt installation."
-        : "Wait for the current operation to finish or cancel the update confirmation before closing BrewPeek."
+        ? "Keep BrewPeek open until Homebrew finishes. Closing now could interrupt the package operation."
+        : "Wait for the current operation to finish or cancel the package confirmation before closing BrewPeek."
         ,
     ])
     return false

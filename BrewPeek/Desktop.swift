@@ -21,6 +21,10 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   var updatePreparing = false
   var preparationControl: UpgradePreparation?
   var updatePlan: UpgradePlan?
+  var removalPlan: PackageRemovalPlan?
+  var cleanupPlan: CleanupPlan?
+  var versionCleanupPlan: VersionCleanupPlan?
+  var recoveryChecked = false
   var output: URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("BrewPeek", isDirectory: true)
@@ -151,8 +155,11 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     }
   }
   @objc func refresh() {
-    guard !busy, updatePlan == nil, updateRequestID == nil else { return }
+    guard !busy, updatePlan == nil, removalPlan == nil, cleanupPlan == nil,
+      versionCleanupPlan == nil, updateRequestID == nil
+    else { return }
     reportLoadID = nil
+    recoveryChecked = false
     busy = true
     inventoryRefreshState = "refreshing"
     refreshButton.isEnabled = false
@@ -249,6 +256,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
               self.loadingSpinner.stopAnimation(nil)
               self.loading.isHidden = true
               self.web.isHidden = false
+              self.restorePendingRemoval()
             }
           }
         case .failure(let error):
@@ -283,12 +291,16 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
     if menuItem.action == #selector(focusSearch) { return hasDisplayedData }
     if menuItem.action == #selector(removeApp) || menuItem.action == #selector(refresh) {
-      return !busy && updatePlan == nil && updateRequestID == nil
+      return !busy && updatePlan == nil && removalPlan == nil && cleanupPlan == nil
+        && versionCleanupPlan == nil
+        && updateRequestID == nil
     }
     return true
   }
   @objc func removeApp() {
-    guard !busy, updatePlan == nil, updateRequestID == nil else { return }
+    guard !busy, updatePlan == nil, removalPlan == nil, cleanupPlan == nil,
+      versionCleanupPlan == nil, updateRequestID == nil
+    else { return }
     busy = true
     refreshButton.isEnabled = false
     let app = Bundle.main.bundleURL

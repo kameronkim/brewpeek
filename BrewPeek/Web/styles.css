@@ -366,6 +366,20 @@ td:first-child {
   gap: 10px;
   text-align: left;
   font: 500 13px var(--mono);
+  max-width: 100%;
+}
+.package-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.deprecated-label {
+  flex: none;
+  padding: 2px 5px;
+  border: 1px solid var(--border);
+  color: var(--secondary);
+  font: 9px/1.2 var(--mono);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 .chevron {
   font-size: 11px;
@@ -1564,3 +1578,22 @@ html,
     animation: none;
   }
 }
+
+/* Cask removal shares the package operation and confirmation surfaces. */
+.detail-field.full, .detail-actions { grid-column: 1 / -1; }
+.detail-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+#confirm[data-operation='uninstall'] .confirm-table col:first-child { width: 52% !important; }
+#confirm[data-operation='uninstall'] .confirm-table col:nth-child(2) { width: 48% !important; }
+#confirm[data-operation='uninstall'] .confirm-table col:nth-child(3),
+#confirm[data-operation='uninstall'] .confirm-table th:nth-child(3),
+#confirm[data-operation='uninstall'] .confirm-table td:nth-child(3) { display: none; }
+
+/* Cleanup recovery keeps the shared confirmation sheet's status column visible. */
+#confirm[data-operation='cleanup'] .confirm-table col:first-child { width: 45% !important; }
+#confirm[data-operation='cleanup'] .confirm-table col:nth-child(2) { width: 25% !important; }
+#confirm[data-operation='cleanup'] .confirm-table col:nth-child(3) { width: 30% !important; }
+.recovery-actions { justify-content: flex-start; margin: 16px 0; }
+
+.version-choice { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+.version-choice input { accent-color: var(--accent); flex: none; }
+.version-choice input:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }

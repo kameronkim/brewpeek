@@ -241,7 +241,9 @@ final class Inventory {
       formulas.append([
         "id": id,
         "name": name, "displayName": name, "version": versions.joined(separator: ", "),
+        "installedVersions": versions,
         "availableVersion": nullable(updates.formulae[formula["full_name"] as? String ?? name]),
+        "deprecated": formula["deprecated"] as? Bool ?? false,
         "type": "formula", "description": formula["desc"] ?? null, "tap": formula["tap"] ?? null,
         "category": category(name, formula["desc"] as? String ?? ""), "leaf": leaves.contains(name),
         "direct": receipts.contains { $0["installed_on_request"] as? Bool == true },
@@ -267,15 +269,19 @@ final class Inventory {
           force: invalidatingSizes.contains(id)))
       var apps: [Record] = []
       var expected = false
-      for artifact in cask["artifacts"] as? [Record] ?? [] {
-        guard let appNames = artifact["app"] as? [Any], let appName = appNames.first as? String
-        else { continue }
+      for path in CaskApps.paths(cask, caskroom: caskroom) {
         expected = true
-        let path = artifact["target"] as? String ?? "/Applications/" + appName
         if let data = try? Data(contentsOf: URL(fileURLWithPath: path + "/Contents/Info.plist")),
           let plist = (try? PropertyListSerialization.propertyList(from: data, format: nil))
             as? Record
         {
+          var watchedPaths = ["Contents/Info.plist"]
+          if let executable = plist["CFBundleExecutable"] as? String,
+            !executable.isEmpty, executable != ".", executable != "..",
+            !executable.contains("/")
+          {
+            watchedPaths.append("Contents/MacOS/" + executable)
+          }
           sizeRequests.append(
             InventorySizeRequest(
               path: path,
@@ -283,7 +289,7 @@ final class Inventory {
                 "installation": installation,
                 "version": plist["CFBundleShortVersionString"] ?? null,
                 "build": plist["CFBundleVersion"] ?? null,
-              ], force: invalidatingSizes.contains(id)))
+              ], force: invalidatingSizes.contains(id), watchedPaths: watchedPaths))
           apps.append([
             "path": path,
             "version": plist["CFBundleShortVersionString"] ?? plist["CFBundleVersion"] ?? null,
@@ -299,6 +305,7 @@ final class Inventory {
         "id": id,
         "name": name, "displayName": names.joined(separator: " / "), "version": version,
         "availableVersion": nullable(updates.casks[name]),
+        "deprecated": cask["deprecated"] as? Bool ?? false,
         "type": "cask", "description": cask["desc"] ?? null, "tap": cask["tap"] ?? null,
         "category": "Other", "leaf": false, "direct": null, "homepage": cask["homepage"] ?? null,
         "dependencies": (cask["depends_on"] as? Record)?["formula"] ?? [String](), "usedBy": null,

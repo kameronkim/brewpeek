@@ -84,7 +84,7 @@ function compare(a, b) {
   return (state.direction === 'asc' ? v : -v) || a.name.localeCompare(b.name);
 }
 function field(label, content, wide = false) {
-  return `<div class="detail-field${wide ? ' wide' : ''}"><dt>${label}</dt><dd>${content}</dd></div>`;
+  return `<div class="detail-field${wide === 'full' ? ' full' : wide ? ' wide' : ''}"><dt>${label}</dt><dd>${content}</dd></div>`;
 }
 function detail(p) {
   let fields =
@@ -115,15 +115,21 @@ function detail(p) {
             .join('<br>')
         : p.appExpected
           ? 'App bundle not found at the registered location'
-          : 'No app bundle expected'
+          : 'No app bundle expected',
+      'full'
     );
   }
-  return `<div class="details-grid"><dl style="display:contents">${fields}</dl></div>`;
+  const actions = p.type === 'cask' || p.direct === true
+    ? `<button class="subtle-btn uninstall-btn" data-uninstall="${esc(key(p))}">Uninstall</button>`
+    : '';
+  const versions = p.type === 'formula' && p.installedVersions?.length > 1
+    ? `<button class="subtle-btn" data-version-cleanup="${esc(key(p))}">Manage versions</button>` : '';
+  return `<div class="details-grid"><dl style="display:contents">${fields}</dl>${versions || actions ? `<div class="detail-actions">${versions}${actions}</div>` : ''}</div>`;
 }
 function row(p) {
   const id = 'detail-' + encodeURIComponent(key(p)),
     open = state.expanded.has(key(p));
-  return `<tr class="package-row" data-key="${esc(key(p))}"><td><button class="package-button" aria-expanded="${open}" aria-controls="${esc(id)}"><span class="chevron" aria-hidden="true">${open ? '−' : '+'}</span><span>${highlighted(p.name)}</span><span class="sr-only"> details</span></button><p class="description">${highlighted(p.type === 'cask' ? [p.displayName, p.description].filter(Boolean).join(' · ') : p.description)}</p></td><td class="version"><div class="version-content"><span class="installed-value" title="${esc(p.version)}">${esc(p.version)}</span>${p.availableVersion ? `<span class="available-version"><span class="available-value" title="${esc(p.availableVersion)}">Available: ${esc(p.availableVersion)}</span></span><button class="update-btn row-update" data-update="${esc(key(p))}">Update</button>` : ''}</div></td>${p.type === 'formula' ? `<td><span class="status ${p.leaf ? 'leaf' : ''}">${status(p)}</span>${p.direct ? '<span class="direct-label">DIRECT</span>' : ''}</td>` : ''}</tr><tr class="detail-row" id="${esc(id)}" ${open ? '' : 'hidden'}><td colspan="${p.type === 'formula' ? 3 : 2}">${open ? detail(p) : ''}</td></tr>`;
+  return `<tr class="package-row" data-key="${esc(key(p))}"><td><button class="package-button" aria-expanded="${open}" aria-controls="${esc(id)}"><span class="chevron" aria-hidden="true">${open ? '−' : '+'}</span><span class="package-name">${highlighted(p.name)}</span>${p.deprecated === true ? '<span class="deprecated-label">DEPRECATED</span>' : ''}<span class="sr-only"> details</span></button><p class="description">${highlighted(p.type === 'cask' ? [p.displayName, p.description].filter(Boolean).join(' · ') : p.description)}</p></td><td class="version"><div class="version-content"><span class="installed-value" title="${esc(p.version)}">${esc(p.version)}</span>${p.availableVersion ? `<span class="available-version"><span class="available-value" title="${esc(p.availableVersion)}">Available: ${esc(p.availableVersion)}</span></span><button class="update-btn row-update" data-update="${esc(key(p))}">Update</button>` : ''}</div></td>${p.type === 'formula' ? `<td><span class="status ${p.leaf ? 'leaf' : ''}">${status(p)}</span>${p.direct ? '<span class="direct-label">DIRECT</span>' : ''}</td>` : ''}</tr><tr class="detail-row" id="${esc(id)}" ${open ? '' : 'hidden'}><td colspan="${p.type === 'formula' ? 3 : 2}">${open ? detail(p) : ''}</td></tr>`;
 }
 function countLabel(count, total) {
   return count === total ? `${count} total` : `${count} of ${total}`;

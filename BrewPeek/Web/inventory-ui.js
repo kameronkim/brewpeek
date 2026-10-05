@@ -2,12 +2,14 @@
 let inventoryRefreshState = 'refreshing';
 function captureInventoryFocus(element = document.activeElement) {
   if (!element || element === document.body) return null;
-  const row = element.closest('.package-row');
+  const row = element.closest('.package-row') || element.closest('.detail-row')?.previousElementSibling;
   return {
     element,
     id: element.id,
     key: row?.dataset.key,
     update: element.hasAttribute('data-update'),
+    uninstall: element.hasAttribute('data-uninstall'),
+    versions: element.hasAttribute('data-version-cleanup'),
     sort: element.dataset.sort,
     section: element.closest('.section')?.id
   };
@@ -19,7 +21,11 @@ function restoreInventoryFocus(focus) {
     const row = [...document.querySelectorAll('.package-row')].find(
       (r) => r.dataset.key === focus.key
     );
-    element = row?.querySelector(focus.update ? '[data-update]:not(:disabled)' : '.package-button');
+    element = focus.versions
+      ? row?.nextElementSibling?.querySelector('[data-version-cleanup]:not(:disabled)')
+      : focus.uninstall
+      ? row?.nextElementSibling?.querySelector('[data-uninstall]:not(:disabled)')
+      : row?.querySelector(focus.update ? '[data-update]:not(:disabled)' : '.package-button');
   }
   if (!element && focus.sort) {
     const section = focus.section ? $(focus.section) : document;
