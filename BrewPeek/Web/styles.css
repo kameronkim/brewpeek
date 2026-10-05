@@ -366,6 +366,20 @@ td:first-child {
   gap: 10px;
   text-align: left;
   font: 500 13px var(--mono);
+  max-width: 100%;
+}
+.package-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.deprecated-label {
+  flex: none;
+  padding: 2px 5px;
+  border: 1px solid var(--border);
+  color: var(--secondary);
+  font: 9px/1.2 var(--mono);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 .chevron {
   font-size: 11px;
