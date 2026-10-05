@@ -18,7 +18,7 @@ let popupReturnFocus = null;
 let pendingCancelFocus = null;
 let operationScrollPending = false;
 const updateBusy = () =>
-  ['checking', 'cancelling', 'running', 'verifying', 'confirming', 'recovering'].includes(updateMode);
+  ['checking', 'cancelling', 'discarding', 'running', 'verifying', 'confirming', 'recovering'].includes(updateMode);
 const postUpdate = (message) => window.webkit.messageHandlers.packageUpdate.postMessage(message);
 const bulk = document.createElement('button');
 bulk.className = 'update-btn bulk';
@@ -140,6 +140,7 @@ function setConfirmState(mode) {
   $('confirm-error').hidden = mode !== 'check-failed';
   $('start').hidden = mode !== 'confirming';
   $('retry-plan').hidden = mode !== 'check-failed';
+  $('cancel').disabled = false;
   $('cancel').textContent = mode === 'check-failed' ? 'Close' : 'Cancel';
   lockBackground();
   if (!$('confirm').open) $('confirm').showModal();
@@ -228,17 +229,20 @@ function showPlan(plan, changed) {
   document.querySelector('.confirm-scroll').scrollTop = 0;
 }
 function cancelUpdate() {
+  if (updateMode === 'discarding') return false;
   const pending = updateMode === 'checking';
   updatePlan = null;
   setUpdateMode(pending ? 'cancelling' : previousResult ? 'result' : 'ready');
   postUpdate({ action: 'cancel' });
   if (!pending) activeRequest = null;
+  return true;
 }
 $('cancel').onclick = () => {
-  cancelUpdate();
-  $('confirm').close();
+  if (cancelUpdate()) $('confirm').close();
 };
-$('confirm').addEventListener('cancel', cancelUpdate);
+$('confirm').addEventListener('cancel', (event) => {
+  if (!cancelUpdate()) event.preventDefault();
+});
 $('confirm').addEventListener('close', () => {
   if ($('confirm').open) return;
   $('confirm-list').replaceChildren();
@@ -264,7 +268,12 @@ $('start').onclick = () => {
   if (!token) return;
   const versions = [...$('confirm-list').querySelectorAll('[data-remove-version]:checked')].map(input => input.dataset.removeVersion);
   activeRequest = crypto.randomUUID();
-  showChecking('Rechecking the confirmed plan…');
+  showChecking(operationKind === 'cleanup-discard' ? 'Discarding saved cleanup…' : 'Rechecking the confirmed plan…');
+  if (operationKind === 'cleanup-discard') {
+    setUpdateMode('discarding');
+    $('confirm-copy').textContent = 'Removing the saved cleanup task. Installed packages stay on this Mac.';
+    $('cancel').disabled = true;
+  }
   postUpdate({ action: operationKind === 'version-cleanup' ? 'startVersions' : operationKind === 'cleanup-discard' ? 'discardCleanup' : operationKind === 'cleanup' ? 'startCleanup' : operationKind === 'uninstall' ? 'startUninstall' : 'start', token, versions, recoveryID: cleanupTaskID, requestID: activeRequest });
 };
 $('packages').addEventListener(
@@ -505,7 +514,7 @@ window.receiveUpdate = function (event) {
     }
     case 'error':
       clearProgressData();
-      if (['checking', 'confirming', 'check-failed'].includes(updateMode)) {
+      if (['checking', 'discarding', 'confirming', 'check-failed'].includes(updateMode)) {
         showCheckError(event.message, event.runningApps);
         break;
       }
