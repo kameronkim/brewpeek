@@ -18,7 +18,7 @@ enum PackageOperationPlan {
   case versions(VersionCleanupPlan)
 }
 
-final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate,
+final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   NSMenuItemValidation, WKScriptMessageHandler, NSWindowDelegate
 {
   var window: NSWindow!
@@ -73,7 +73,6 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     config.userContentController.add(self, name: "packageUpdate")
     web = WKWebView(frame: .zero, configuration: config)
     web.navigationDelegate = self
-    web.uiDelegate = self
     web.allowsBackForwardNavigationGestures = false
     web.isHidden = true
     loadingSpinner.style = .spinning
