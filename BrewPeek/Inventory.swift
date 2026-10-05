@@ -303,7 +303,7 @@ final class Inventory {
         "availableVersion": nullable(updates.formulae[formula["full_name"] as? String ?? name]),
         "deprecated": formula["deprecated"] as? Bool ?? false,
         "type": "formula", "description": formula["desc"] ?? null, "tap": formula["tap"] ?? null,
-        "category": category(name, formula["desc"] as? String ?? ""), "leaf": leaves.contains(name),
+        "category": category(name, formula["desc"] as? String ?? ""), "leaf": leaves.contains(item.fullName),
         "direct": receipts.contains { $0["installed_on_request"] as? Bool == true },
         "homepage": formula["homepage"] ?? null, "dependencies": dependencies(formula),
         "usedBy": Array(reverse[name] ?? []).sorted(),
