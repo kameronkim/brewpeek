@@ -123,7 +123,7 @@ struct PackageRemoval {
     else {
       throw InventoryError(message: "Select an installed package to uninstall.")
     }
-    let info = try engine.installedMetadata(control: control).installed
+    let info = try engine.installedMetadata(control: control)
     let installed = try engine.resolvedPackages(info, control: control)
     guard
       var package = installed.first(where: {

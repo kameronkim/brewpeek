@@ -75,12 +75,6 @@ final class Upgrade {
     return try process.command(
       arguments, environmentOverrides: environmentOverrides, streaming: streaming)
   }
-  func json(_ arguments: [String], control: UpgradePreparation? = nil) throws -> Record {
-    if arguments == ["info", "--json=v2", "--installed"] {
-      return try installedMetadata(control: control).raw
-    }
-    return try readJSON(arguments, control: control)
-  }
   private func readJSON(_ arguments: [String], control: UpgradePreparation?) throws -> Record {
     let text =
       try control.map { try readOnly(arguments, control: $0) }
@@ -92,31 +86,13 @@ final class Upgrade {
   }
   /// Validate once, retaining the raw snapshot for inventory and typed fields for operations.
   func installedMetadata(control: UpgradePreparation? = nil) throws
-    -> (raw: Record, installed: InstalledPackageInfo)
+    -> InstalledPackageInfo
   {
     latestInstalledInfo = nil
     let raw = try readJSON(["info", "--json=v2", "--installed"], control: control)
     let installed = try Inventory.validateInstalledInfo(raw)
     latestInstalledInfo = raw
-    return (raw, installed)
-  }
-  /// Plan metadata may describe new dependencies with no installed receipts.
-  static func packages(_ info: Record, caskroom: String? = nil) -> [UpgradePackage] {
-    let formulae = (info["formulae"] as? [Record] ?? []).compactMap { raw -> InstalledFormulaInfo? in
-      guard let name = raw["name"] as? String else { return nil }
-      let receipts = raw["installed"] as? [Record] ?? []
-      return InstalledFormulaInfo(
-        raw: raw, name: name, fullName: raw["full_name"] as? String ?? name,
-        receipts: receipts, versions: receipts.compactMap { $0["version"] as? String })
-    }
-    let casks = (info["casks"] as? [Record] ?? []).compactMap { raw -> InstalledCaskInfo? in
-      guard let name = raw["token"] as? String else { return nil }
-      let versions = raw["installed"] as? [String]
-        ?? (raw["installed"] as? String).map { [$0] } ?? []
-      return InstalledCaskInfo(
-        raw: raw, name: name, fullName: raw["full_token"] as? String ?? name, versions: versions)
-    }
-    return packages(InstalledPackageInfo(formulae: formulae, casks: casks), caskroom: caskroom)
+    return installed
   }
   static func packages(_ info: InstalledPackageInfo, caskroom: String? = nil) -> [UpgradePackage] {
     var result: [UpgradePackage] = []
@@ -229,7 +205,7 @@ final class Upgrade {
     return Self.packages(info, caskroom: caskroom)
   }
   func installed(control: UpgradePreparation? = nil) throws -> [UpgradePackage] {
-    try resolvedPackages(installedMetadata(control: control).installed, control: control)
+    try resolvedPackages(installedMetadata(control: control), control: control)
   }
   /// Read only recognized plan blocks, then resolve every name through Homebrew JSON.
   static func plannedNames(_ text: String) throws -> [String] {
@@ -319,7 +295,7 @@ final class Upgrade {
       let matches = selected.filter { $0.fullName == name || $0.name == name }
       return matches.isEmpty ? [name] : matches.map(\.argument)
     }
-    let metadata = try json(["info", "--json=v2"] + arguments, control: control)
+    let metadata = try readJSON(["info", "--json=v2"] + arguments, control: control)
     var packages = try resolvedPackages(metadata, control: control)
     func matches(_ package: UpgradePackage, _ name: String) -> Bool {
       package.fullName == name || package.name == name || package.argument == name
