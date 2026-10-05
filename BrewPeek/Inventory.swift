@@ -419,25 +419,15 @@ final class Inventory {
     ]
   }
   func generate(output: URL) throws {
-    try FileManager.default.createDirectory(
-      at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
-    let lockPath = output.deletingLastPathComponent().appendingPathComponent(
-      ".homebrew-report.lock"
-    ).path
-    let fd = open(lockPath, O_CREAT | O_RDWR, 0o600)
-    guard fd >= 0 else {
-      throw InventoryError(
-        message: NSLocalizedString("Cannot write to the data folder.", comment: ""))
+    try HomebrewOperationLock.withLock(
+      at: output,
+      openError: NSLocalizedString("Cannot write to the data folder.", comment: ""),
+      busyError: NSLocalizedString(
+        "Another inventory collection is in progress. Please try again shortly.", comment: "")
+    ) {
+      let snapshot = try collect(previous: try? InventoryStore.load(output))
+      try checkCancellation()
+      try InventoryStore.save(snapshot, to: output)
     }
-    defer { close(fd) }
-    guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
-      throw InventoryError(
-        message: NSLocalizedString(
-          "Another inventory collection is in progress. Please try again shortly.", comment: ""))
-    }
-    defer { flock(fd, LOCK_UN) }
-    let snapshot = try collect(previous: try? InventoryStore.load(output))
-    try checkCancellation()
-    try InventoryStore.save(snapshot, to: output)
   }
 }

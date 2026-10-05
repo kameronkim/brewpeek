@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 struct UpgradePackage {
@@ -498,16 +497,6 @@ final class Upgrade {
     ]
   }
   static func withLock<T>(at output: URL, _ action: () throws -> T) throws -> T {
-    let dir = output.deletingLastPathComponent()
-    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let fd = open(dir.appendingPathComponent(".homebrew-report.lock").path, O_CREAT | O_RDWR, 0o600)
-    guard fd >= 0 else { throw InventoryError(message: "Could not open the operation lock.") }
-    defer { close(fd) }
-    guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
-      throw InventoryError(
-        message: "Another BrewPeek operation is running. Try again when it finishes.")
-    }
-    defer { flock(fd, LOCK_UN) }
-    return try action()
+    try HomebrewOperationLock.withLock(at: output, action)
   }
 }
