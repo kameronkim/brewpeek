@@ -1,9 +1,13 @@
+import Darwin
 import Foundation
 
 /// Shared only between the UI cancellation action and the read-only preparation worker.
 final class UpgradePreparation {
   private let lock = NSLock()
   private var cancelled = false
+  private let stopLock = NSLock()
+  private var currentProcess: Process?
+  private var temporaryDirectory: URL?
   private let deadline: TimeInterval
   init(timeout: TimeInterval = 180) {
     deadline = ProcessInfo.processInfo.systemUptime + timeout
@@ -11,16 +15,67 @@ final class UpgradePreparation {
   func cancel() {
     lock.lock()
     cancelled = true
+    if let task = currentProcess, task.isRunning { task.terminate() }
     lock.unlock()
   }
-  func check() throws {
+
+  /// Launch and register atomically so cancellation cannot miss a just-started query.
+  func start(_ task: Process, temporaryDirectory: URL) throws {
     lock.lock()
-    let stopped = cancelled
+    defer { lock.unlock() }
+    try checkLocked()
+    try task.run()
+    currentProcess = task
+    self.temporaryDirectory = temporaryDirectory
+  }
+
+  func finish(_ task: Process) {
+    lock.lock()
+    defer { lock.unlock() }
+    guard currentProcess === task else { return }
+    if let directory = temporaryDirectory { try? FileManager.default.removeItem(at: directory) }
+    currentProcess = nil
+    temporaryDirectory = nil
+  }
+
+  /// Used only for read-only preparation. Package mutations must never be interrupted here.
+  func stop(_ task: Process) {
+    stopLock.lock()
+    defer { stopLock.unlock() }
+    if task.isRunning {
+      task.terminate()
+      let deadline = ProcessInfo.processInfo.systemUptime + 0.5
+      while task.isRunning && ProcessInfo.processInfo.systemUptime < deadline {
+        Thread.sleep(forTimeInterval: 0.02)
+      }
+      if task.isRunning { kill(task.processIdentifier, SIGKILL) }
+    }
+    task.waitUntilExit()
+  }
+
+  /// App termination waits for the owned query and removes its temporary output.
+  func cancelAndWait() {
+    lock.lock()
+    cancelled = true
+    let task = currentProcess
     lock.unlock()
-    if stopped { throw InventoryError(message: "Update check cancelled.") }
+    if let task {
+      stop(task)
+      finish(task)
+    }
+  }
+
+  private func checkLocked() throws {
+    if cancelled { throw InventoryError(message: "Update check cancelled.") }
     if ProcessInfo.processInfo.systemUptime >= deadline {
       throw InventoryError(message: "The update check timed out. Check your connection and retry.")
     }
+  }
+
+  func check() throws {
+    lock.lock()
+    defer { lock.unlock() }
+    try checkLocked()
   }
 }
 

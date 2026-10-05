@@ -404,7 +404,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   func applicationWillTerminate(_ notification: Notification) {
     reportLoadID = nil
     collectingInventory?.cancel()
-    preparationControl?.cancel()
+    preparationControl?.cancelAndWait()
   }
 }
 @main

@@ -71,7 +71,8 @@ final class BrewProcess {
     task.standardInput = FileHandle.nullDevice
     task.standardOutput = out
     task.standardError = combinedOutput ? out : err
-    try task.run()
+    try control.start(task, temporaryDirectory: dir)
+    defer { control.finish(task) }
     do {
       while task.isRunning {
         try control.check()
@@ -80,15 +81,7 @@ final class BrewProcess {
       task.waitUntilExit()
       try control.check()
     } catch {
-      if task.isRunning {
-        task.terminate()
-        let grace = ProcessInfo.processInfo.systemUptime + 0.5
-        while task.isRunning && ProcessInfo.processInfo.systemUptime < grace {
-          Thread.sleep(forTimeInterval: 0.02)
-        }
-        if task.isRunning { kill(task.processIdentifier, SIGKILL) }
-      }
-      task.waitUntilExit()
+      control.stop(task)
       throw error
     }
     let output = try String(contentsOf: outURL, encoding: .utf8)
