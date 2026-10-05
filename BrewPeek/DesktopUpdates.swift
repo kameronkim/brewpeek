@@ -25,7 +25,7 @@ extension DesktopApp {
       prepareVersionCleanup(
         key: keys[0], requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "startVersions":
-      guard let token = request["token"] as? String, let plan = versionCleanupPlan,
+      guard let token = request["token"] as? String, case let .versions(plan)? = operationPlan,
         token == plan.token, let selected = request["versions"] as? [String]
       else { return }
       startVersionCleanup(
@@ -34,7 +34,7 @@ extension DesktopApp {
       guard let id = request["recoveryID"] as? String else { return }
       prepareSavedCleanup(id: id, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "startCleanup":
-      guard let token = request["token"] as? String, let plan = cleanupPlan, token == plan.token
+      guard let token = request["token"] as? String, case let .cleanup(plan)? = operationPlan, token == plan.token
       else { return }
       startSavedCleanup(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "discardCleanup":
@@ -46,7 +46,7 @@ extension DesktopApp {
         key: keys[0], requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "startUninstall":
       guard let token = request["token"] as? String,
-        let plan = removalPlan, token == plan.token
+        case let .uninstall(plan)? = operationPlan, token == plan.token
       else { return }
       startPackageRemoval(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "prepare":
@@ -54,7 +54,7 @@ extension DesktopApp {
       prepareUpdate(keys: keys, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "start":
       guard let token = request["token"] as? String,
-        let plan = updatePlan, token == plan.token
+        case let .update(plan)? = operationPlan, token == plan.token
       else { return }
       startUpdate(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
     default:
@@ -64,35 +64,39 @@ extension DesktopApp {
 
   private func cancelUpdatePreparation() {
     if updatePreparing {
-      updateRequestID = nil
-      updatePlan = nil
-      removalPlan = nil
-      cleanupPlan = nil
-      versionCleanupPlan = nil
+      // Keep ownership until the worker acknowledges cancellation; do not admit another task yet.
+      cancelledPreparationRequestID = updateRequestID
+      operationPlan = nil
       preparationControl?.cancel()
     } else if !busy {
       updateRequestID = nil
-      updatePlan = nil
-      removalPlan = nil
-      cleanupPlan = nil
-      versionCleanupPlan = nil
+      operationPlan = nil
       sendUpdate(["kind": "cancelled"])
     }
   }
 
-  private func prepareUpdate(keys: [String], requestID: String) {
+  /// Register read-only work before notifying the web UI, on the main queue.
+  func beginPackagePreparation(
+    requestID: String, rechecking: Bool = false,
+    operation: String? = nil, message: String? = nil
+  ) -> UpgradePreparation {
     reportLoadID = nil
-    busy = true
-    updatePreparing = true
+    operationPhase = rechecking ? .rechecking : .preparing
     updateRequestID = requestID
-    updatePlan = nil
-    removalPlan = nil
-    cleanupPlan = nil
-    versionCleanupPlan = nil
-    sendUpdate(["kind": "checking", "requestID": requestID])
-    let destination = output
+    cancelledPreparationRequestID = nil
+    operationPlan = nil
     let control = UpgradePreparation()
     preparationControl = control
+    var event: Record = ["kind": "checking", "requestID": requestID]
+    if let operation { event["operation"] = operation }
+    if let message { event["message"] = message }
+    sendUpdate(event)
+    return control
+  }
+
+  private func prepareUpdate(keys: [String], requestID: String) {
+    let control = beginPackagePreparation(requestID: requestID)
+    let destination = output
     DispatchQueue.global(qos: .userInitiated).async {
       do {
         let engine = Upgrade(brew: try Inventory.locateBrew())
@@ -101,7 +105,7 @@ extension DesktopApp {
         }
         DispatchQueue.main.async {
           guard self.finishPreparation(requestID) else { return }
-          self.updatePlan = plan
+          self.operationPlan = .update(plan)
           self.sendUpdate(["kind": "plan", "plan": plan.record, "requestID": requestID])
         }
       } catch {
@@ -119,7 +123,7 @@ extension DesktopApp {
     updateRequestID = requestID
     let active = runningApps(for: plan.packages)
     guard active.isEmpty else {
-      updatePlan = nil
+      operationPlan = nil
       sendUpdate([
         "kind": "error", "runningApps": Array(Set(active)).sorted(),
         "message": "Close these apps before updating, then retry: "
@@ -127,16 +131,9 @@ extension DesktopApp {
       ])
       return
     }
-    busy = true
-    updateInProgress = true
-    updatePreparing = true
-    updatePlan = nil
-    sendUpdate([
-      "kind": "checking", "message": "Rechecking the confirmed plan…", "requestID": requestID,
-    ])
+    let control = beginPackagePreparation(
+      requestID: requestID, rechecking: true, message: "Rechecking the confirmed plan…")
     let destination = output
-    let control = UpgradePreparation()
-    preparationControl = control
     DispatchQueue.global(qos: .userInitiated).async {
       do {
         let engine = Upgrade(brew: try Inventory.locateBrew())
@@ -145,7 +142,7 @@ extension DesktopApp {
           guard fresh.fingerprint == plan.fingerprint else {
             DispatchQueue.main.async {
               guard self.finishPreparation(requestID) else { return }
-              self.updatePlan = fresh
+              self.operationPlan = .update(fresh)
               self.sendUpdate([
                 "kind": "plan", "plan": fresh.record, "changed": true, "requestID": requestID,
               ])
@@ -157,18 +154,14 @@ extension DesktopApp {
           }
           guard shouldStart else { return }
           var result = try engine.execute(fresh) { event in
+            var event = event
+            event["requestID"] = requestID
             DispatchQueue.main.async { self.sendUpdate(event) }
           }
           // Keep results even if inventory collection fails after an otherwise completed upgrade.
-          do {
-            let affected = Set(
-              (result["packages"] as? [Record] ?? []).compactMap { $0["id"] as? String })
-            let snapshot = try engine.inventory.collect(
-              refreshMetadata: false, previous: try? InventoryStore.load(destination),
-              invalidatingSizes: affected)
-            try InventoryStore.save(snapshot, to: destination)
-            result["snapshot"] = InventoryStore.displaySnapshot(snapshot)
-          } catch { result["refreshError"] = error.localizedDescription }
+          OperationInventory.append(
+            to: &result, inventory: engine.inventory, destination: destination,
+            invalidatingSizes: Set((result["packages"] as? [Record] ?? []).compactMap { $0["id"] as? String }), installedInfo: engine.latestInstalledInfo)
           result["retryKeys"] = fresh.selected.map(\.id)
           result["command"] =
             ([engine.inventory.brew, "upgrade"] + fresh.selected.map(\.argument)).map {
@@ -176,24 +169,14 @@ extension DesktopApp {
             }.joined(separator: " ")
           let completed = result
           DispatchQueue.main.async {
-            self.busy = false
-            self.updateInProgress = false
-            self.updateRequestID = nil
-            self.sendUpdate(completed)
+            self.finishPackageOperation(completed, requestID: requestID)
           }
         }
       } catch {
         DispatchQueue.main.async {
-          if self.updatePreparing {
-            guard self.finishPreparation(requestID) else { return }
-          } else {
-            self.updateRequestID = nil
-          }
-          self.busy = false
-          self.updateInProgress = false
-          self.sendUpdate([
-            "kind": "error", "message": error.localizedDescription, "requestID": requestID,
-          ])
+          guard self.finishPackageOperation([
+            "kind": "error", "message": error.localizedDescription,
+          ], requestID: requestID) else { return }
         }
       }
     }
@@ -201,7 +184,7 @@ extension DesktopApp {
 
   /// Check the freshly prepared targets on the main queue immediately before mutation.
   func beginPreparedUpdate(_ plan: UpgradePlan, requestID: String) -> Bool {
-    guard updateRequestID == requestID else {
+    guard isCurrentPreparation(requestID) else {
       _ = finishPreparation(requestID)
       return false
     }
@@ -215,28 +198,47 @@ extension DesktopApp {
       ])
       return false
     }
-    updatePreparing = false
+    operationPhase = .running
     preparationControl = nil
     sendUpdate(["kind": "started", "plan": plan.record, "requestID": requestID])
     return true
   }
 
   /// Runs on the main queue, including the final cancellation gate before mutation.
+  func isCurrentPreparation(_ requestID: String) -> Bool {
+    updateRequestID == requestID && cancelledPreparationRequestID != requestID
+  }
+
   func finishPreparation(_ requestID: String) -> Bool {
-    busy = false
-    updatePreparing = false
-    updateInProgress = false
+    // An obsolete callback must not release the current worker's state or cancellation control.
+    guard updateRequestID == requestID else { return false }
+    operationPhase = .idle
     preparationControl = nil
-    guard updateRequestID == requestID else {
-      updatePlan = nil
-      removalPlan = nil
-      cleanupPlan = nil
-      versionCleanupPlan = nil
-      sendUpdate(["kind": "cancelled"])
+    if cancelledPreparationRequestID == requestID {
+      cancelledPreparationRequestID = nil
+      updateRequestID = nil
+      operationPlan = nil
+      sendUpdate(["kind": "cancelled", "requestID": requestID])
       return false
     }
     return true
   }
+  /// Complete only the operation that still owns the native state, on the main queue.
+  @discardableResult
+  func finishPackageOperation(_ event: Record, requestID: String) -> Bool {
+    guard updateRequestID == requestID else { return false }
+    if updatePreparing, !finishPreparation(requestID) { return false }
+    operationPhase = .idle
+    operationPlan = nil
+    preparationControl = nil
+    cancelledPreparationRequestID = nil
+    updateRequestID = nil
+    var completed = event
+    completed["requestID"] = requestID
+    sendUpdate(completed)
+    return true
+  }
+
   func runningApps(for packages: [UpgradePackage]) -> [String] {
     let names = NSWorkspace.shared.runningApplications.compactMap { app -> String? in
       guard let url = app.bundleURL,
@@ -253,8 +255,7 @@ extension DesktopApp {
   }
   private func permitClose() -> Bool {
     guard
-      updateInProgress || updatePlan != nil || removalPlan != nil || cleanupPlan != nil
-        || versionCleanupPlan != nil
+      updateInProgress || hasOperationPlan
     else {
       return true
     }

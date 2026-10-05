@@ -6,6 +6,24 @@ struct InventoryError: LocalizedError {
   let message: String
   var errorDescription: String? { message }
 }
+struct InstalledFormulaInfo {
+  let raw: Record
+  let name: String
+  let fullName: String
+  let receipts: [Record]
+  let versions: [String]
+}
+struct InstalledCaskInfo {
+  let raw: Record
+  let name: String
+  let fullName: String
+  let versions: [String]
+}
+struct InstalledPackageInfo {
+  let formulae: [InstalledFormulaInfo]
+  let casks: [InstalledCaskInfo]
+}
+
 final class Inventory {
   let brew: String
   let null = NSNull()
@@ -195,45 +213,86 @@ final class Inventory {
       return ([:], [:], ["status": "failed", "error": error.localizedDescription])
     }
   }
+  /// Validate installed metadata before it can be cached or used to verify a mutation.
+  @discardableResult
+  static func validateInstalledInfo(_ info: Record) throws -> InstalledPackageInfo {
+    func invalid() -> InventoryError {
+      InventoryError(message: "Homebrew returned incomplete installed package information.")
+    }
+    func validIdentifier(_ value: Any?) -> Bool {
+      guard let text = value as? String, !text.isEmpty else { return false }
+      return HomebrewPackageName.isValid(text)
+    }
+    guard let formulae = info["formulae"] as? [Record], let casks = info["casks"] as? [Record]
+    else { throw invalid() }
+    var identities = Set<String>()
+    let validatedFormulae = try formulae.map { formula -> InstalledFormulaInfo in
+      guard validIdentifier(formula["name"]),
+        let name = formula["name"] as? String,
+        validIdentifier(formula["full_name"] ?? name),
+        let receipts = formula["installed"] as? [Record],
+        receipts.allSatisfy({ ($0["version"] as? String)?.isEmpty == false }),
+        identities.insert("formula:" + (formula["full_name"] as? String ?? name)).inserted
+      else { throw invalid() }
+      return InstalledFormulaInfo(
+        raw: formula, name: name, fullName: formula["full_name"] as? String ?? name,
+        receipts: receipts, versions: receipts.compactMap { $0["version"] as? String })
+    }
+    let validatedCasks = try casks.map { cask -> InstalledCaskInfo in
+      guard validIdentifier(cask["token"]), let token = cask["token"] as? String,
+        validIdentifier(cask["full_token"] ?? token),
+        identities.insert("cask:" + (cask["full_token"] as? String ?? token)).inserted
+      else { throw invalid() }
+      let versions = cask["installed"] as? [String]
+        ?? (cask["installed"] as? String).map { [$0] }
+      guard let versions, versions.allSatisfy({ !$0.isEmpty }) else { throw invalid() }
+      return InstalledCaskInfo(
+        raw: cask, name: token, fullName: cask["full_token"] as? String ?? token, versions: versions)
+    }
+    return InstalledPackageInfo(formulae: validatedFormulae, casks: validatedCasks)
+  }
+
   func collect(
-    refreshMetadata: Bool = true, previous: Record? = nil, invalidatingSizes: Set<String> = []
+    refreshMetadata: Bool = true, previous: Record? = nil, invalidatingSizes: Set<String> = [],
+    installedInfo: Record? = nil
   ) throws -> Record {
     let updates = checkUpdates(refreshMetadata: refreshMetadata)
-    let text = try run(brew, ["info", "--json=v2", "--installed"])
-    guard let raw = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? Record,
-      let formulae = raw["formulae"] as? [Record], let casks = raw["casks"] as? [Record]
-    else {
-      throw InventoryError(
-        message: NSLocalizedString("The Homebrew data has an invalid format.", comment: ""))
+    try checkCancellation()
+    let raw: Record
+    if let installedInfo {
+      raw = installedInfo
+    } else {
+      let text = try run(brew, ["info", "--json=v2", "--installed"])
+      guard let value = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? Record else {
+        throw InventoryError(
+          message: NSLocalizedString("The Homebrew data has an invalid format.", comment: ""))
+      }
+      raw = value
     }
-    let leaves = Set(lines(try run(brew, ["leaves"])))
+    let installed = try Self.validateInstalledInfo(raw)
+    let formulae = installed.formulae
+    let casks = installed.casks
+    let leaves = Set(lines(try run(brew, ["leaves"])).map(HomebrewPackageName.formulaIdentity))
     let taps = lines(try run(brew, ["tap"]))
     let prefix = try run(brew, ["--prefix"])
     let cellar = try run(brew, ["--cellar"])
     let caskroom = try run(brew, ["--caskroom"])
+    let formulaNames = Dictionary(grouping: formulae, by: \.name)
     var reverse: [String: Set<String>] = [:]
-    for formula in formulae {
-      guard let name = formula["name"] as? String else {
-        throw InventoryError(message: NSLocalizedString("Formula name is missing.", comment: ""))
-      }
-      for dep in dependencies(formula) {
-        reverse[String(dep.split(separator: "/").last ?? Substring(dep)), default: []].insert(name)
+    for item in formulae {
+      let label = (formulaNames[item.name]?.count ?? 0) > 1 ? item.fullName : item.name
+      for dep in dependencies(item.raw) {
+        reverse[HomebrewPackageName.formulaIdentity(dep), default: []].insert(label)
       }
     }
     var sizeRequests: [InventorySizeRequest] = []
     var formulas: [Record] = []
-    for formula in formulae {
-      guard let name = formula["name"] as? String, let receipts = formula["installed"] as? [Record]
-      else {
-        throw InventoryError(
-          message: NSLocalizedString("Formula installation records are missing.", comment: ""))
-      }
-      let versions = receipts.compactMap { $0["version"] as? String }
-      guard versions.count == receipts.count else {
-        throw InventoryError(
-          message: NSLocalizedString("Installed version is missing: ", comment: "") + name)
-      }
-      let id = "formula:" + (formula["full_name"] as? String ?? name)
+    for item in formulae {
+      let formula = item.raw
+      let name = item.name
+      let receipts = item.receipts
+      let versions = item.versions
+      let id = "formula:" + item.fullName
       sizeRequests.append(
         InventorySizeRequest(
           path: cellar + "/" + name, metadata: ["installed": receipts],
@@ -245,20 +304,20 @@ final class Inventory {
         "availableVersion": nullable(updates.formulae[formula["full_name"] as? String ?? name]),
         "deprecated": formula["deprecated"] as? Bool ?? false,
         "type": "formula", "description": formula["desc"] ?? null, "tap": formula["tap"] ?? null,
-        "category": category(name, formula["desc"] as? String ?? ""), "leaf": leaves.contains(name),
+        "category": category(name, formula["desc"] as? String ?? ""),
+        "leaf": leaves.contains(HomebrewPackageName.formulaIdentity(item.fullName)),
         "direct": receipts.contains { $0["installed_on_request"] as? Bool == true },
         "homepage": formula["homepage"] ?? null, "dependencies": dependencies(formula),
-        "usedBy": Array(reverse[name] ?? []).sorted(),
+        "usedBy": Array(reverse[HomebrewPackageName.formulaIdentity(item.fullName)] ?? []).sorted(),
         "paths": versions.map { cellar + "/" + name + "/" + $0 },
         "size": null, "apps": [Record](),
       ])
     }
     var applications: [Record] = []
-    for cask in casks {
-      guard let name = cask["token"] as? String else {
-        throw InventoryError(message: NSLocalizedString("Cask token is missing.", comment: ""))
-      }
-      let id = "cask:" + (cask["full_token"] as? String ?? name)
+    for item in casks {
+      let cask = item.raw
+      let name = item.name
+      let id = "cask:" + item.fullName
       let installation: Record = [
         "installed": cask["installed"] ?? null,
         "installedTime": cask["installed_time"] ?? null,
@@ -297,9 +356,7 @@ final class Inventory {
           ])
         }
       }
-      let version: Any =
-        (cask["installed"] as? [String]).map { $0.joined(separator: ", ") } ?? cask["installed"]
-        ?? null
+      let version = item.versions.joined(separator: ", ")
       let names = cask["name"] as? [String] ?? [name]
       applications.append([
         "id": id,
@@ -364,25 +421,15 @@ final class Inventory {
     ]
   }
   func generate(output: URL) throws {
-    try FileManager.default.createDirectory(
-      at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
-    let lockPath = output.deletingLastPathComponent().appendingPathComponent(
-      ".homebrew-report.lock"
-    ).path
-    let fd = open(lockPath, O_CREAT | O_RDWR, 0o600)
-    guard fd >= 0 else {
-      throw InventoryError(
-        message: NSLocalizedString("Cannot write to the data folder.", comment: ""))
+    try HomebrewOperationLock.withLock(
+      at: output,
+      openError: NSLocalizedString("Cannot write to the data folder.", comment: ""),
+      busyError: NSLocalizedString(
+        "Another inventory collection is in progress. Please try again shortly.", comment: "")
+    ) {
+      let snapshot = try collect(previous: try? InventoryStore.load(output))
+      try checkCancellation()
+      try InventoryStore.save(snapshot, to: output)
     }
-    defer { close(fd) }
-    guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
-      throw InventoryError(
-        message: NSLocalizedString(
-          "Another inventory collection is in progress. Please try again shortly.", comment: ""))
-    }
-    defer { flock(fd, LOCK_UN) }
-    let snapshot = try collect(previous: try? InventoryStore.load(output))
-    try checkCancellation()
-    try InventoryStore.save(snapshot, to: output)
   }
 }

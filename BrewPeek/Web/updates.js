@@ -18,7 +18,7 @@ let popupReturnFocus = null;
 let pendingCancelFocus = null;
 let operationScrollPending = false;
 const updateBusy = () =>
-  ['checking', 'cancelling', 'running', 'verifying', 'confirming', 'recovering'].includes(updateMode);
+  ['checking', 'cancelling', 'discarding', 'running', 'verifying', 'confirming', 'recovering'].includes(updateMode);
 const postUpdate = (message) => window.webkit.messageHandlers.packageUpdate.postMessage(message);
 const bulk = document.createElement('button');
 bulk.className = 'update-btn bulk';
@@ -140,6 +140,7 @@ function setConfirmState(mode) {
   $('confirm-error').hidden = mode !== 'check-failed';
   $('start').hidden = mode !== 'confirming';
   $('retry-plan').hidden = mode !== 'check-failed';
+  $('cancel').disabled = false;
   $('cancel').textContent = mode === 'check-failed' ? 'Close' : 'Cancel';
   lockBackground();
   if (!$('confirm').open) $('confirm').showModal();
@@ -165,13 +166,18 @@ function showCheckError(message, runningApps = []) {
     $('confirm-error').innerHTML =
       `<ul class="running-apps" aria-label="Apps to close">${runningApps.map((name) => `<li><strong>${esc(name)}</strong><span>Running</span></li>`).join('')}</ul>`;
   } else {
-    $('confirm-title').textContent = operationKind === 'version-cleanup' ? 'Could not review versions' : operationKind.startsWith('cleanup') ? 'Could not prepare cleanup' : operationKind === 'uninstall' ? 'Could not prepare uninstall' : 'Could not check updates';
+    $('confirm-title').textContent = operationKind === 'version-cleanup' ? 'Could not review versions' : operationKind === 'cleanup-discard' ? 'Could not discard cleanup' : operationKind === 'cleanup' ? 'Could not prepare cleanup' : operationKind === 'uninstall' ? 'Could not prepare uninstall' : 'Could not check updates';
     $('confirm-copy').textContent = 'Review the details and try again.';
     $('confirm-error').innerHTML = `<pre>${esc(message)}</pre>`;
   }
   $('retry-plan').focus({ preventScroll: true });
 }
-$('retry-plan').onclick = () => operationKind.startsWith('cleanup') ? checkCleanup($('retry-plan')) : checkChanges(requestedKeys, $('retry-plan'), operationKind);
+function retryOperation(trigger) {
+  if (operationKind === 'cleanup-discard') confirmDiscardCleanup(trigger);
+  else if (operationKind === 'cleanup') checkCleanup(trigger);
+  else checkChanges(requestedKeys, trigger, operationKind);
+}
+$('retry-plan').onclick = () => retryOperation($('retry-plan'));
 function showPlan(plan, changed) {
   updatePlan = plan;
   operationKind = plan.operation || 'update';
@@ -223,17 +229,20 @@ function showPlan(plan, changed) {
   document.querySelector('.confirm-scroll').scrollTop = 0;
 }
 function cancelUpdate() {
+  if (updateMode === 'discarding') return false;
   const pending = updateMode === 'checking';
   updatePlan = null;
   setUpdateMode(pending ? 'cancelling' : previousResult ? 'result' : 'ready');
   postUpdate({ action: 'cancel' });
   if (!pending) activeRequest = null;
+  return true;
 }
 $('cancel').onclick = () => {
-  cancelUpdate();
-  $('confirm').close();
+  if (cancelUpdate()) $('confirm').close();
 };
-$('confirm').addEventListener('cancel', cancelUpdate);
+$('confirm').addEventListener('cancel', (event) => {
+  if (!cancelUpdate()) event.preventDefault();
+});
 $('confirm').addEventListener('close', () => {
   if ($('confirm').open) return;
   $('confirm-list').replaceChildren();
@@ -259,7 +268,12 @@ $('start').onclick = () => {
   if (!token) return;
   const versions = [...$('confirm-list').querySelectorAll('[data-remove-version]:checked')].map(input => input.dataset.removeVersion);
   activeRequest = crypto.randomUUID();
-  showChecking('Rechecking the confirmed plan…');
+  showChecking(operationKind === 'cleanup-discard' ? 'Discarding saved cleanup…' : 'Rechecking the confirmed plan…');
+  if (operationKind === 'cleanup-discard') {
+    setUpdateMode('discarding');
+    $('confirm-copy').textContent = 'Removing the saved cleanup task. Installed packages stay on this Mac.';
+    $('cancel').disabled = true;
+  }
   postUpdate({ action: operationKind === 'version-cleanup' ? 'startVersions' : operationKind === 'cleanup-discard' ? 'discardCleanup' : operationKind === 'cleanup' ? 'startCleanup' : operationKind === 'uninstall' ? 'startUninstall' : 'start', token, versions, recoveryID: cleanupTaskID, requestID: activeRequest });
 };
 $('packages').addEventListener(
@@ -385,7 +399,15 @@ function paintResult(result) {
     .join(' · ');
   const issues = result.packages.filter((p) => !['updated', 'installed', 'uninstalled', 'kept', 'removed'].includes(p.outcome));
   $('operation').innerHTML =
-    `<section class="operation"><div class="operation-top"><div><div class="eyebrow">${versions ? 'VERSION CLEANUP RESULTS' : uninstall ? 'UNINSTALL RESULTS' : 'UPDATE RESULTS'}</div><h3>${esc(recoveryTitle || summary)}</h3><p>${versions ? (result.verified ? 'Installed versions checked.' : 'Installed versions could not be checked.') : uninstall ? (result.verified ? 'Homebrew package registrations checked.' : 'Package registrations could not be checked.') : (result.verified ? 'Installed versions checked.' : 'Installed versions could not be checked.')}${result.refreshError ? ' Inventory refresh failed; use Refresh to try again.' : ''}</p></div><button class="subtle-btn" id="dismiss">Close results</button></div>${result.recovered ? '<p>Current Homebrew registrations checked. Nothing has resumed automatically.</p>' : ''}${result.recoveryID ? `<div class="dialog-actions recovery-actions">${pending ? '<button class="subtle-btn" id="retry-cleanup">Retry cleanup</button>' : ''}<button class="subtle-btn" id="discard-cleanup">Discard pending cleanup</button></div>${pending ? '<p>Remaining dependencies are checked again before removal. The task stays saved if the app closes.</p>' : ''}` : ''}${issues.length ? `<div class="issues">${issues.map((p) => `<div class="issue-item"><div><strong>${esc(p.name)}</strong><p>${esc(p.message)}</p></div>${!uninstall || (p.id === result.packages[0].id && p.actualVersion !== 'Not installed') ? `<button class="subtle-btn" data-retry="${esc(p.id)}">Retry</button>` : ''}</div>`).join('')}</div>` : ''}<details><summary>All results · ${result.packages.length}</summary><ul class="result-list bounded-list">${result.packages.map((p) => `<li>${esc(p.name)}<span>${esc(p.message)}<small class="dependency-note">${versions ? 'Version' : uninstall ? 'Registration' : 'Installed'}: ${esc(p.actualVersion)}</small></span></li>`).join('')}</ul></details><details><summary>Show activity</summary><pre>${esc(result.details || '')}${result.refreshError ? '\n' + esc(result.refreshError) : ''}</pre></details>${issues.length && result.command ? '<div class="dialog-actions"><button class="subtle-btn" id="terminal-help">View Terminal command</button></div>' : ''}</section>`;
+    `<section class="operation"><div class="operation-top"><div><div class="eyebrow">${versions ? 'VERSION CLEANUP RESULTS' : uninstall ? 'UNINSTALL RESULTS' : 'UPDATE RESULTS'}</div><h3>${esc(recoveryTitle || summary)}</h3><p>${versions ? (result.verified ? 'Installed versions checked.' : 'Installed versions could not be checked.') : uninstall ? (result.verified ? 'Homebrew package registrations checked.' : 'Package registrations could not be checked.') : (result.verified ? 'Installed versions checked.' : 'Installed versions could not be checked.')}${result.refreshError ? ' Inventory refresh failed; use Refresh to try again.' : ''}</p></div><button class="subtle-btn" id="dismiss">Close results</button></div>${result.commandWarning ? `<p role="status">${esc(result.commandWarning)}</p>` : ''}${result.recoveryError ? `<p role="status">${esc(result.recoveryError)}</p>` : ''}${result.recovered ? '<p>Current Homebrew registrations checked. Nothing has resumed automatically.</p>' : ''}${result.recoveryID ? `<div class="dialog-actions recovery-actions">${pending ? '<button class="subtle-btn" id="retry-cleanup">Retry cleanup</button>' : ''}<button class="subtle-btn" id="discard-cleanup">Discard pending cleanup</button></div>${pending ? '<p>Remaining dependencies are checked again before removal. The task stays saved if the app closes.</p>' : ''}` : ''}${issues.length ? `<div class="issues">${issues.map((p) => `<div class="issue-item"><div><strong>${esc(p.name)}</strong><p>${esc(p.message)}</p></div>${!uninstall || (!pending && p.id === result.packages[0].id && p.actualVersion !== 'Not installed') ? `<button class="subtle-btn" data-retry="${esc(p.id)}">Retry</button>` : ''}</div>`).join('')}</div>` : ''}<details><summary>All results · ${result.packages.length}</summary><ul class="result-list bounded-list">${result.packages.map((p) => `<li>${esc(p.name)}<span>${esc(p.message)}<small class="dependency-note">${versions ? 'Version' : uninstall ? 'Registration' : 'Installed'}: ${esc(p.actualVersion)}</small></span></li>`).join('')}</ul></details><details id="result-log"><summary>Show activity</summary><pre></pre></details>${issues.length && result.command ? '<div class="dialog-actions"><button class="subtle-btn" id="terminal-help">View Terminal command</button></div>' : ''}</section>`;
+  const log = $('result-log');
+  let activityRendered = false;
+  log.ontoggle = () => {
+    if (!log.open || activityRendered) return;
+    log.querySelector('pre').textContent =
+      (result.details || '') + (result.refreshError ? '\n' + result.refreshError : '');
+    activityRendered = true;
+  };
   if ($('retry-cleanup')) $('retry-cleanup').onclick = () => checkCleanup($('retry-cleanup'));
   if ($('discard-cleanup')) $('discard-cleanup').onclick = () => confirmDiscardCleanup($('discard-cleanup'));
   $('dismiss').onclick = () => {
@@ -482,7 +504,7 @@ window.receiveUpdate = function (event) {
       clearProgressData();
       previousResult = result;
       setUpdateMode('result');
-      if (snapshot) window.setInventory(snapshot);
+      if (snapshot) window.setInventory(snapshot, { preserveView: false });
       paintResult(result);
       restoreInventoryView(view);
       syncActionAvailability();
@@ -492,7 +514,7 @@ window.receiveUpdate = function (event) {
     }
     case 'error':
       clearProgressData();
-      if (['checking', 'confirming', 'check-failed'].includes(updateMode)) {
+      if (['checking', 'discarding', 'confirming', 'check-failed'].includes(updateMode)) {
         showCheckError(event.message, event.runningApps);
         break;
       }
@@ -504,7 +526,7 @@ window.receiveUpdate = function (event) {
         $('operation').innerHTML =
           `<section class="operation"><div class="eyebrow">${operationKind === 'uninstall' ? 'UNINSTALL UNAVAILABLE' : 'UPDATE UNAVAILABLE'}</div><h3>Could not complete the operation</h3><p>Review the details and try again.</p><details open><summary>Details</summary><pre>${esc(event.message)}</pre></details><div class="dialog-actions"><button class="subtle-btn" id="retry-check">Retry check</button></div></section>`;
       if ($('retry-check'))
-        $('retry-check').onclick = () => operationKind.startsWith('cleanup') ? checkCleanup($('retry-check')) : checkChanges(requestedKeys, $('retry-check'), operationKind);
+        $('retry-check').onclick = () => retryOperation($('retry-check'));
       if (previousResult) showNotice(operationKind === 'uninstall' ? 'Could not uninstall package' : 'Could not check updates', event.message);
       finishNotice();
       break;

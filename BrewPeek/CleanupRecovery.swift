@@ -48,7 +48,7 @@ enum RemovalTaskStore {
     guard task.schemaVersion == 1, UUID(uuidString: task.id) != nil,
       ["formula", "cask"].contains(task.root.type),
       task.dependencies.allSatisfy({ $0.type == "formula" }),
-      packages.allSatisfy({ Upgrade.validName($0.fullName) && !$0.current.isEmpty }),
+      packages.allSatisfy({ HomebrewPackageName.isValid($0.fullName) && !$0.current.isEmpty }),
       Set(packages.map { $0.package.id }).count == packages.count
     else { throw InventoryError(message: "The saved cleanup task has an invalid format.") }
     return task
@@ -64,6 +64,27 @@ enum RemovalTaskStore {
       throw InventoryError(message: "The saved cleanup task changed. Refresh before continuing.")
     }
     try FileManager.default.removeItem(at: url(for: inventory))
+  }
+  /// Persistence errors must not replace a completed Homebrew operation's results.
+  static func finishPreservingResult(
+    _ task: RemovalTask, result: inout Record, at inventory: URL, cleanup: Bool = false
+  ) {
+    do {
+      let pending = try finish(task, result: result, at: inventory)
+      result.removeValue(forKey: "recoveryID")
+      result.removeValue(forKey: "pendingCleanup")
+      if pending {
+        result["recoveryID"] = task.id
+        result["pendingCleanup"] = (cleanup && result["verified"] as? Bool != true)
+          || (result["packages"] as? [Record])?.first?["actualVersion"] as? String == "Not installed"
+      }
+    } catch {
+      // Do not promise that a stale or unreadable task can be retried from this result.
+      result.removeValue(forKey: "recoveryID")
+      result.removeValue(forKey: "pendingCleanup")
+      result["recoveryError"] = "Could not update the saved cleanup task. Refresh to check recovery status.\n"
+        + error.localizedDescription
+    }
   }
   static func finish(_ task: RemovalTask, result: Record, at inventory: URL) throws -> Bool {
     guard result["verified"] as? Bool == true, let rows = result["packages"] as? [Record] else {
@@ -239,7 +260,21 @@ extension PackageRemoval {
       exit = command.0
     }
     event(["kind": "verifying"])
-    let installed = try engine.installed()
+    let installed: [UpgradePackage]
+    do { installed = try engine.installed() } catch {
+      log.append("\n" + error.localizedDescription)
+      let rows = ([plan.task.root] + plan.task.dependencies).map { saved -> Record in
+        var row = saved.package.record
+        row["actualVersion"] = "Unknown"
+        row["outcome"] = "attention"
+        row["message"] = "Could not verify removal. Retry cleanup to review the current installation."
+        return row
+      }
+      return [
+        "kind": "result", "operation": "uninstall", "packages": rows,
+        "verified": false, "details": log.text, "exitCode": exit,
+      ]
+    }
     var root = plan.task.root.package.record
     let actualRoot = installed.first { $0.id == plan.task.root.package.id }
     root["actualVersion"] = actualRoot?.current.joined(separator: ", ") ?? "Not installed"
@@ -254,9 +289,12 @@ extension PackageRemoval {
       var row = saved.package.record
       let actual = installed.first { $0.id == saved.package.id }
       row["actualVersion"] = actual?.current.joined(separator: ", ") ?? "Not installed"
-      row["outcome"] = actual == nil ? "uninstalled" : "failed"
-      row["message"] =
-        actual == nil ? "Uninstalled" : "Still installed. Retry cleanup to review it again."
+      let attempted = plan.packages.contains { $0.id == saved.package.id }
+      row["outcome"] = actual == nil ? (attempted && exit != 0 ? "attention" : "uninstalled") : "failed"
+      row["message"] = actual == nil
+        ? (attempted && exit != 0
+          ? "Removed, but Homebrew reported an error. Review activity." : "Uninstalled")
+        : "Still installed. Retry cleanup to review it again."
       return row
     }
     return [

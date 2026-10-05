@@ -1,7 +1,24 @@
 import Cocoa
 import WebKit
 
-final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate,
+enum PackageOperationPhase {
+  case idle
+  case preparing
+  case rechecking
+  case running
+
+  var isPreparing: Bool { self == .preparing || self == .rechecking }
+  var isExecuting: Bool { self == .rechecking || self == .running }
+}
+
+enum PackageOperationPlan {
+  case update(UpgradePlan)
+  case uninstall(PackageRemovalPlan)
+  case cleanup(CleanupPlan)
+  case versions(VersionCleanupPlan)
+}
+
+final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   NSMenuItemValidation, WKScriptMessageHandler, NSWindowDelegate
 {
   var window: NSWindow!
@@ -15,15 +32,17 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   var hasDisplayedData = false
   var inventoryRefreshState = "idle"
   var collectingInventory: Inventory?
-  var busy = false
-  var updateInProgress = false
+  // Inventory refresh, recovery inspection and app removal have separate lifetimes.
+  var auxiliaryBusy = false
+  var operationPhase: PackageOperationPhase = .idle
+  var busy: Bool { auxiliaryBusy || operationPhase != .idle }
+  var updateInProgress: Bool { operationPhase.isExecuting }
   var updateRequestID: String?
-  var updatePreparing = false
+  var cancelledPreparationRequestID: String?
+  var updatePreparing: Bool { operationPhase.isPreparing }
   var preparationControl: UpgradePreparation?
-  var updatePlan: UpgradePlan?
-  var removalPlan: PackageRemovalPlan?
-  var cleanupPlan: CleanupPlan?
-  var versionCleanupPlan: VersionCleanupPlan?
+  var operationPlan: PackageOperationPlan?
+  var hasOperationPlan: Bool { operationPlan != nil }
   var recoveryChecked = false
   var output: URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -54,7 +73,6 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     config.userContentController.add(self, name: "packageUpdate")
     web = WKWebView(frame: .zero, configuration: config)
     web.navigationDelegate = self
-    web.uiDelegate = self
     web.allowsBackForwardNavigationGestures = false
     web.isHidden = true
     loadingSpinner.style = .spinning
@@ -155,12 +173,11 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     }
   }
   @objc func refresh() {
-    guard !busy, updatePlan == nil, removalPlan == nil, cleanupPlan == nil,
-      versionCleanupPlan == nil, updateRequestID == nil
+    guard !busy, !hasOperationPlan, updateRequestID == nil
     else { return }
     reportLoadID = nil
     recoveryChecked = false
-    busy = true
+    auxiliaryBusy = true
     inventoryRefreshState = "refreshing"
     refreshButton.isEnabled = false
     refreshButton.isHidden = true
@@ -197,7 +214,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   }
   func finishRefresh(error: Error? = nil) {
     collectingInventory = nil
-    busy = false
+    auxiliaryBusy = false
     inventoryRefreshState = error == nil ? "idle" : "failed"
     refreshButton.isEnabled = true
     if let error {
@@ -291,17 +308,15 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
     if menuItem.action == #selector(focusSearch) { return hasDisplayedData }
     if menuItem.action == #selector(removeApp) || menuItem.action == #selector(refresh) {
-      return !busy && updatePlan == nil && removalPlan == nil && cleanupPlan == nil
-        && versionCleanupPlan == nil
+      return !busy && !hasOperationPlan
         && updateRequestID == nil
     }
     return true
   }
   @objc func removeApp() {
-    guard !busy, updatePlan == nil, removalPlan == nil, cleanupPlan == nil,
-      versionCleanupPlan == nil, updateRequestID == nil
+    guard !busy, !hasOperationPlan, updateRequestID == nil
     else { return }
-    busy = true
+    auxiliaryBusy = true
     refreshButton.isEnabled = false
     let app = Bundle.main.bundleURL
     let reports = output.deletingLastPathComponent()
@@ -315,16 +330,16 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     alert.addButton(withTitle: NSLocalizedString("Move to Trash", comment: ""))
     alert.beginSheetModal(for: window) { response in
       guard response == .alertSecondButtonReturn else {
-        self.busy = false
+        self.auxiliaryBusy = false
         self.refreshButton.isEnabled = true
         return
       }
       do {
         try DesktopRemoval.remove(app: app, reports: reports)
-        self.busy = false
+        self.auxiliaryBusy = false
         NSApp.terminate(nil)
       } catch {
-        self.busy = false
+        self.auxiliaryBusy = false
         self.refreshButton.isEnabled = true
         self.showError(error.localizedDescription)
       }
@@ -388,7 +403,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   func applicationWillTerminate(_ notification: Notification) {
     reportLoadID = nil
     collectingInventory?.cancel()
-    preparationControl?.cancel()
+    preparationControl?.cancelAndWait()
   }
 }
 @main

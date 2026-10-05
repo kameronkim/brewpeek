@@ -301,11 +301,6 @@ h2 {
   font: 11px var(--mono);
   color: var(--secondary);
 }
-.section-subtitle {
-  font: 10px var(--mono);
-  color: var(--secondary);
-  letter-spacing: 0.07em;
-}
 table {
   width: 100%;
   border-collapse: collapse;
@@ -440,12 +435,6 @@ td:first-child {
 .detail-field.wide {
   grid-column: span 2;
 }
-.detail-desc {
-  grid-column: 1/-1;
-  font: 13px var(--sans);
-  color: var(--text);
-  margin: 0;
-}
 .empty {
   margin: 0;
   min-height: 63px;
@@ -465,10 +454,6 @@ td:first-child {
 }
 .taps-list p {
   margin: 0 0 7px;
-}
-.quiet {
-  color: var(--secondary);
-  font: 12px/1.7 var(--sans);
 }
 .env {
   background: var(--surface);
@@ -501,19 +486,6 @@ footer {
   display: flex;
   justify-content: space-between;
   gap: 25px;
-}
-.method {
-  margin-top: 18px;
-  color: var(--secondary);
-  font-size: 12px;
-}
-.method summary {
-  cursor: pointer;
-  width: fit-content;
-}
-.method ul {
-  padding-left: 20px;
-  line-height: 1.8;
 }
 .sr-only {
   position: absolute;
@@ -659,9 +631,6 @@ mark {
     gap: 7px;
     margin-top: 9px;
   }
-  .section-subtitle {
-    display: none;
-  }
   .section {
     margin-top: 25px;
   }
@@ -721,9 +690,6 @@ mark {
   .detail-field {
     margin: 17px 0;
   }
-  .detail-desc {
-    margin-bottom: 15px;
-  }
   .env {
     grid-template-columns: 1fr;
     padding: 18px;
@@ -755,7 +721,6 @@ mark {
   }
   button,
   th,
-  .quiet,
   .description {
     color: #444;
   }
@@ -1012,11 +977,6 @@ mark {
   background: var(--bg);
   padding: 14px;
 }
-.step-count {
-  font: 11px var(--mono);
-  color: var(--secondary);
-  margin-right: 15px;
-}
 .pulse {
   display: inline-block;
   width: 7px;
@@ -1119,9 +1079,6 @@ dialog p {
   background: var(--accent);
   transition: width 0.4s linear;
 }
-.download-list {
-  margin-top: 20px;
-}
 .download-item {
   display: grid;
   grid-template-columns: 130px 1fr 170px;
@@ -1138,15 +1095,6 @@ dialog p {
 }
 .download-item .progress-track {
   height: 2px;
-}
-.progress-caption {
-  font: 10px var(--mono);
-  color: var(--secondary);
-  margin-top: 8px;
-}
-.phase-tag {
-  color: var(--secondary);
-  font: 11px var(--mono);
 }
 .indeterminate .progress-fill {
   width: 30% !important;
@@ -1447,10 +1395,6 @@ body.modal-open {
 }
 .issue-item button {
   flex-shrink: 0;
-}
-.discovered-note {
-  border-left: 2px solid #596248;
-  padding-left: 10px;
 }
 #notice pre {
   white-space: pre-wrap;
