@@ -84,6 +84,10 @@ Open a package's details and click **Uninstall**. This is available for casks an
 
 If removal or dependency cleanup does not finish, BrewPeek saves the unfinished task locally. On the next launch, it checks the current installation and shows the remaining work in **Uninstall results**. Nothing resumes automatically. **Retry cleanup** checks the remaining dependencies again and opens a new confirmation; changed installations are kept. **Close results** hides the panel, while **Discard pending cleanup** removes the saved task without removing installed packages.
 
+## Removing old Formula versions
+
+For a Formula with multiple installed versions, open its details and choose **Manage versions**. Select individual old versions in the confirmation window. Homebrew decides which versions can be removed; current, linked, pinned, and required versions are kept. BrewPeek rechecks the installation before removal and refreshes the inventory afterward. Package caches and dependencies are not removed by this action.
+
 ## Checking your environment
 
 The **Environment** section shows your Homebrew installation prefix and version, Mac architecture, macOS version, and the disk usage of the Cellar and Caskroom. **Additional taps** lists the extra package repositories registered with Homebrew.
