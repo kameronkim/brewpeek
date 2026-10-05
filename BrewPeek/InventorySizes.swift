@@ -6,6 +6,7 @@ struct InventorySizeRequest {
   let path: String
   let metadata: Record
   var force = false
+  var watchedPaths: [String] = []
 }
 
 /// A disposable cache: installed-package data remains authoritative.
@@ -42,8 +43,17 @@ enum InventorySizes {
         files[name] = child
       }
     }
+    // App self-updates can change files below Contents without changing the bundle root.
+    for relative in request.watchedPaths {
+      let url = URL(fileURLWithPath: request.path).appendingPathComponent(relative)
+      guard let watched = fileState(url.path),
+        let resolved = fileState(url.resolvingSymlinksInPath().path)
+      else { return nil }
+      files[relative] = [watched, resolved]
+    }
     return digest(["metadata": request.metadata, "files": files])
   }
+
   private static func contains(_ parent: String, _ child: String) -> Bool {
     child.hasPrefix(parent.hasSuffix("/") ? parent : parent + "/")
   }

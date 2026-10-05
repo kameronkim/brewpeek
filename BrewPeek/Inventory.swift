@@ -275,6 +275,13 @@ final class Inventory {
           let plist = (try? PropertyListSerialization.propertyList(from: data, format: nil))
             as? Record
         {
+          var watchedPaths = ["Contents/Info.plist"]
+          if let executable = plist["CFBundleExecutable"] as? String,
+            !executable.isEmpty, executable != ".", executable != "..",
+            !executable.contains("/")
+          {
+            watchedPaths.append("Contents/MacOS/" + executable)
+          }
           sizeRequests.append(
             InventorySizeRequest(
               path: path,
@@ -282,7 +289,7 @@ final class Inventory {
                 "installation": installation,
                 "version": plist["CFBundleShortVersionString"] ?? null,
                 "build": plist["CFBundleVersion"] ?? null,
-              ], force: invalidatingSizes.contains(id)))
+              ], force: invalidatingSizes.contains(id), watchedPaths: watchedPaths))
           apps.append([
             "path": path,
             "version": plist["CFBundleShortVersionString"] ?? plist["CFBundleVersion"] ?? null,
