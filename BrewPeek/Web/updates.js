@@ -165,13 +165,18 @@ function showCheckError(message, runningApps = []) {
     $('confirm-error').innerHTML =
       `<ul class="running-apps" aria-label="Apps to close">${runningApps.map((name) => `<li><strong>${esc(name)}</strong><span>Running</span></li>`).join('')}</ul>`;
   } else {
-    $('confirm-title').textContent = operationKind === 'version-cleanup' ? 'Could not review versions' : operationKind.startsWith('cleanup') ? 'Could not prepare cleanup' : operationKind === 'uninstall' ? 'Could not prepare uninstall' : 'Could not check updates';
+    $('confirm-title').textContent = operationKind === 'version-cleanup' ? 'Could not review versions' : operationKind === 'cleanup-discard' ? 'Could not discard cleanup' : operationKind === 'cleanup' ? 'Could not prepare cleanup' : operationKind === 'uninstall' ? 'Could not prepare uninstall' : 'Could not check updates';
     $('confirm-copy').textContent = 'Review the details and try again.';
     $('confirm-error').innerHTML = `<pre>${esc(message)}</pre>`;
   }
   $('retry-plan').focus({ preventScroll: true });
 }
-$('retry-plan').onclick = () => operationKind.startsWith('cleanup') ? checkCleanup($('retry-plan')) : checkChanges(requestedKeys, $('retry-plan'), operationKind);
+function retryOperation(trigger) {
+  if (operationKind === 'cleanup-discard') confirmDiscardCleanup(trigger);
+  else if (operationKind === 'cleanup') checkCleanup(trigger);
+  else checkChanges(requestedKeys, trigger, operationKind);
+}
+$('retry-plan').onclick = () => retryOperation($('retry-plan'));
 function showPlan(plan, changed) {
   updatePlan = plan;
   operationKind = plan.operation || 'update';
@@ -512,7 +517,7 @@ window.receiveUpdate = function (event) {
         $('operation').innerHTML =
           `<section class="operation"><div class="eyebrow">${operationKind === 'uninstall' ? 'UNINSTALL UNAVAILABLE' : 'UPDATE UNAVAILABLE'}</div><h3>Could not complete the operation</h3><p>Review the details and try again.</p><details open><summary>Details</summary><pre>${esc(event.message)}</pre></details><div class="dialog-actions"><button class="subtle-btn" id="retry-check">Retry check</button></div></section>`;
       if ($('retry-check'))
-        $('retry-check').onclick = () => operationKind.startsWith('cleanup') ? checkCleanup($('retry-check')) : checkChanges(requestedKeys, $('retry-check'), operationKind);
+        $('retry-check').onclick = () => retryOperation($('retry-check'));
       if (previousResult) showNotice(operationKind === 'uninstall' ? 'Could not uninstall package' : 'Could not check updates', event.message);
       finishNotice();
       break;
