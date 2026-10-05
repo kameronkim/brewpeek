@@ -487,14 +487,6 @@ footer {
   justify-content: space-between;
   gap: 25px;
 }
-.method summary {
-  cursor: pointer;
-  width: fit-content;
-}
-.method ul {
-  padding-left: 20px;
-  line-height: 1.8;
-}
 .sr-only {
   position: absolute;
   width: 1px;
@@ -639,9 +631,6 @@ mark {
     gap: 7px;
     margin-top: 9px;
   }
-  .section-subtitle {
-    display: none;
-  }
   .section {
     margin-top: 25px;
   }
@@ -701,9 +690,6 @@ mark {
   .detail-field {
     margin: 17px 0;
   }
-  .detail-desc {
-    margin-bottom: 15px;
-  }
   .env {
     grid-template-columns: 1fr;
     padding: 18px;
@@ -735,7 +721,6 @@ mark {
   }
   button,
   th,
-  .quiet,
   .description {
     color: #444;
   }
