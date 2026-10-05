@@ -2,7 +2,7 @@ import Cocoa
 import WebKit
 
 extension DesktopApp {
-  private func sendUpdate(_ event: Record) {
+  func sendUpdate(_ event: Record) {
     web.callAsyncJavaScript(
       "window.receiveUpdate(event)", arguments: ["event": event], in: nil, in: .page
     ) { result in
@@ -20,6 +20,15 @@ extension DesktopApp {
     guard !busy else { return }
 
     switch action {
+    case "prepareUninstall":
+      guard let keys = request["keys"] as? [String], keys.count == 1 else { return }
+      preparePackageRemoval(
+        key: keys[0], requestID: request["requestID"] as? String ?? UUID().uuidString)
+    case "startUninstall":
+      guard let token = request["token"] as? String,
+        let plan = removalPlan, token == plan.token
+      else { return }
+      startPackageRemoval(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "prepare":
       guard let keys = request["keys"] as? [String], !keys.isEmpty else { return }
       prepareUpdate(keys: keys, requestID: request["requestID"] as? String ?? UUID().uuidString)
@@ -37,10 +46,12 @@ extension DesktopApp {
     if updatePreparing {
       updateRequestID = nil
       updatePlan = nil
+      removalPlan = nil
       preparationControl?.cancel()
     } else if !busy {
       updateRequestID = nil
       updatePlan = nil
+      removalPlan = nil
       sendUpdate(["kind": "cancelled"])
     }
   }
@@ -51,6 +62,7 @@ extension DesktopApp {
     updatePreparing = true
     updateRequestID = requestID
     updatePlan = nil
+    removalPlan = nil
     sendUpdate(["kind": "checking", "requestID": requestID])
     let destination = output
     let control = UpgradePreparation()
@@ -79,18 +91,7 @@ extension DesktopApp {
 
   private func startUpdate(_ plan: UpgradePlan, requestID: String) {
     updateRequestID = requestID
-    let running = NSWorkspace.shared.runningApplications
-    let active = running.compactMap { app -> String? in
-      guard let url = app.bundleURL,
-        plan.packages.contains(where: { p in
-          p.type == "cask"
-            && p.apps.contains { appPath in
-              URL(fileURLWithPath: appPath).lastPathComponent == url.lastPathComponent
-            }
-        })
-      else { return nil }
-      return app.localizedName ?? url.deletingPathExtension().lastPathComponent
-    }
+    let active = runningApps(for: plan.packages)
     guard active.isEmpty else {
       updatePlan = nil
       sendUpdate([
@@ -180,25 +181,40 @@ extension DesktopApp {
   }
 
   /// Runs on the main queue, including the final cancellation gate before mutation.
-  private func finishPreparation(_ requestID: String) -> Bool {
+  func finishPreparation(_ requestID: String) -> Bool {
     busy = false
     updatePreparing = false
     updateInProgress = false
     preparationControl = nil
     guard updateRequestID == requestID else {
       updatePlan = nil
+      removalPlan = nil
       sendUpdate(["kind": "cancelled"])
       return false
     }
     return true
   }
+  func runningApps(for packages: [UpgradePackage]) -> [String] {
+    let names = NSWorkspace.shared.runningApplications.compactMap { app -> String? in
+      guard let url = app.bundleURL,
+        packages.contains(where: { package in
+          package.type == "cask"
+            && package.apps.contains { path in
+              URL(fileURLWithPath: path).lastPathComponent == url.lastPathComponent
+            }
+        })
+      else { return nil }
+      return app.localizedName ?? url.deletingPathExtension().lastPathComponent
+    }
+    return Array(Set(names)).sorted()
+  }
   private func permitClose() -> Bool {
-    guard updateInProgress || updatePlan != nil else { return true }
+    guard updateInProgress || updatePlan != nil || removalPlan != nil else { return true }
     sendUpdate([
       "kind": "closeBlocked",
       "message": updateInProgress
-        ? "Keep BrewPeek open until Homebrew finishes. Closing now could interrupt installation."
-        : "Wait for the current operation to finish or cancel the update confirmation before closing BrewPeek."
+        ? "Keep BrewPeek open until Homebrew finishes. Closing now could interrupt the package operation."
+        : "Wait for the current operation to finish or cancel the package confirmation before closing BrewPeek."
         ,
     ])
     return false
