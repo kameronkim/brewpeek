@@ -253,7 +253,7 @@ struct PackageRemoval {
         } else {
           item["outcome"] = "attention"
           item["message"] =
-            p.type == "formula" && !attempted.contains(p.id)
+            p.id != package.id && !attempted.contains(p.id)
             ? "Dependency removal did not start. Review activity."
             : "Still registered as installed. Review activity and retry."
           if exit != 0 { item["outcome"] = "failed" }
