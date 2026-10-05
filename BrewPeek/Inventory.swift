@@ -195,6 +195,40 @@ final class Inventory {
       return ([:], [:], ["status": "failed", "error": error.localizedDescription])
     }
   }
+  /// Validate installed metadata before it can be cached or used to verify a mutation.
+  static func validateInstalledInfo(_ info: Record) throws {
+    func invalid() -> InventoryError {
+      InventoryError(message: "Homebrew returned incomplete installed package information.")
+    }
+    func validIdentifier(_ value: Any?) -> Bool {
+      guard let text = value as? String, !text.isEmpty else { return false }
+      return text.range(
+        of: #"^[a-zA-Z0-9][a-zA-Z0-9@+_.-]*(/[a-zA-Z0-9][a-zA-Z0-9@+_.-]*){0,2}$"#,
+        options: .regularExpression) != nil
+    }
+    guard let formulae = info["formulae"] as? [Record], let casks = info["casks"] as? [Record]
+    else { throw invalid() }
+    var identities = Set<String>()
+    for formula in formulae {
+      guard validIdentifier(formula["name"]),
+        let name = formula["name"] as? String,
+        validIdentifier(formula["full_name"] ?? name),
+        let receipts = formula["installed"] as? [Record],
+        receipts.allSatisfy({ ($0["version"] as? String)?.isEmpty == false }),
+        identities.insert("formula:" + (formula["full_name"] as? String ?? name)).inserted
+      else { throw invalid() }
+    }
+    for cask in casks {
+      guard validIdentifier(cask["token"]), let token = cask["token"] as? String,
+        validIdentifier(cask["full_token"] ?? token),
+        identities.insert("cask:" + (cask["full_token"] as? String ?? token)).inserted
+      else { throw invalid() }
+      let versions = cask["installed"] as? [String]
+        ?? (cask["installed"] as? String).map { [$0] }
+      guard let versions, versions.allSatisfy({ !$0.isEmpty }) else { throw invalid() }
+    }
+  }
+
   func collect(
     refreshMetadata: Bool = true, previous: Record? = nil, invalidatingSizes: Set<String> = [],
     installedInfo: Record? = nil
@@ -212,11 +246,9 @@ final class Inventory {
       }
       raw = value
     }
-    guard let formulae = raw["formulae"] as? [Record], let casks = raw["casks"] as? [Record]
-    else {
-      throw InventoryError(
-        message: NSLocalizedString("The Homebrew data has an invalid format.", comment: ""))
-    }
+    try Self.validateInstalledInfo(raw)
+    let formulae = raw["formulae"] as! [Record]
+    let casks = raw["casks"] as! [Record]
     let leaves = Set(lines(try run(brew, ["leaves"])))
     let taps = lines(try run(brew, ["tap"]))
     let prefix = try run(brew, ["--prefix"])

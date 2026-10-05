@@ -126,9 +126,7 @@ final class Upgrade {
       throw InventoryError(message: "Homebrew returned invalid package information.")
     }
     if installedQuery {
-      guard object["formulae"] is [Record], object["casks"] is [Record] else {
-        throw InventoryError(message: "Homebrew returned incomplete installed package information.")
-      }
+      try Inventory.validateInstalledInfo(object)
       latestInstalledInfo = object
     }
     return object
