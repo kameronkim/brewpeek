@@ -105,13 +105,9 @@ extension DesktopApp {
               (result["packages"] as? [Record])?.first?["actualVersion"] as? String
               == "Not installed"
           }
-          do {
-            let snapshot = try removal.engine.inventory.collect(
-              refreshMetadata: false, previous: try? InventoryStore.load(destination),
-              invalidatingSizes: Set(fresh.packages.map(\.id)))
-            try InventoryStore.save(snapshot, to: destination)
-            result["snapshot"] = InventoryStore.displaySnapshot(snapshot)
-          } catch { result["refreshError"] = error.localizedDescription }
+          OperationInventory.append(
+            to: &result, inventory: removal.engine.inventory, destination: destination,
+            invalidatingSizes: Set(fresh.packages.map(\.id)))
           result["retryKeys"] = [fresh.package.id]
           result["requestID"] = requestID
           var command = [
@@ -278,14 +274,9 @@ extension DesktopApp {
               (result["packages"] as? [Record])?.first?["actualVersion"] as? String
               == "Not installed"
           }
-          do {
-            let snapshot = try removal.engine.inventory.collect(
-              refreshMetadata: false,
-              previous: try? InventoryStore.load(destination),
-              invalidatingSizes: Set(fresh.packages.map(\.id)))
-            try InventoryStore.save(snapshot, to: destination)
-            result["snapshot"] = InventoryStore.displaySnapshot(snapshot)
-          } catch { result["refreshError"] = error.localizedDescription }
+          OperationInventory.append(
+            to: &result, inventory: removal.engine.inventory, destination: destination,
+            invalidatingSizes: Set(fresh.packages.map(\.id)))
           result["requestID"] = requestID
           let completed = result
           DispatchQueue.main.async {

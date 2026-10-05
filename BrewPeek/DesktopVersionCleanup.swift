@@ -83,13 +83,9 @@ extension DesktopApp {
             event["requestID"] = requestID
             DispatchQueue.main.async { self.sendUpdate(event) }
           }
-          do {
-            let snapshot = try cleanup.engine.inventory.collect(
-              refreshMetadata: false,
-              previous: try? InventoryStore.load(destination), invalidatingSizes: [fresh.key])
-            try InventoryStore.save(snapshot, to: destination)
-            result["snapshot"] = InventoryStore.displaySnapshot(snapshot)
-          } catch { result["refreshError"] = error.localizedDescription }
+          OperationInventory.append(
+            to: &result, inventory: cleanup.engine.inventory, destination: destination,
+            invalidatingSizes: [fresh.key])
           result["requestID"] = requestID
           let completed = result
           DispatchQueue.main.async {

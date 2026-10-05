@@ -160,15 +160,9 @@ extension DesktopApp {
             DispatchQueue.main.async { self.sendUpdate(event) }
           }
           // Keep results even if inventory collection fails after an otherwise completed upgrade.
-          do {
-            let affected = Set(
-              (result["packages"] as? [Record] ?? []).compactMap { $0["id"] as? String })
-            let snapshot = try engine.inventory.collect(
-              refreshMetadata: false, previous: try? InventoryStore.load(destination),
-              invalidatingSizes: affected)
-            try InventoryStore.save(snapshot, to: destination)
-            result["snapshot"] = InventoryStore.displaySnapshot(snapshot)
-          } catch { result["refreshError"] = error.localizedDescription }
+          OperationInventory.append(
+            to: &result, inventory: engine.inventory, destination: destination,
+            invalidatingSizes: Set((result["packages"] as? [Record] ?? []).compactMap { $0["id"] as? String }))
           result["retryKeys"] = fresh.selected.map(\.id)
           result["command"] =
             ([engine.inventory.brew, "upgrade"] + fresh.selected.map(\.argument)).map {
