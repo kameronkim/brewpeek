@@ -443,6 +443,8 @@ final class Upgrade {
       if Date().timeIntervalSince(lastEvent) >= 0.1 { flushActivity() }
     }
     if !bufferedLines.isEmpty { flushActivity() }
+    let commandWarning = result.0 == 0 ? ""
+      : "Homebrew exited with an error (code \(result.0)). Review activity for details."
     event(["kind": "verifying"])
     let after: [UpgradePackage]
     do { after = try installed() } catch {
@@ -458,6 +460,7 @@ final class Upgrade {
           r["actualVersion"] = "Unknown"
           return r
         }, "details": details.text, "verified": false, "exitCode": result.0,
+        "commandWarning": commandWarning,
       ]
     }
     items = items.map { p in
@@ -521,7 +524,7 @@ final class Upgrade {
     }
     return [
       "kind": "result", "packages": records, "details": result.1, "verified": true,
-      "exitCode": result.0,
+      "exitCode": result.0, "commandWarning": commandWarning,
     ]
   }
   static func withLock<T>(at output: URL, _ action: () throws -> T) throws -> T {
