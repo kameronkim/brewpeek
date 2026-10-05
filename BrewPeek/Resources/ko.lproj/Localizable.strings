@@ -41,3 +41,11 @@
 "The saved inventory has an invalid format." = "저장된 설치 정보의 형식이 올바르지 않습니다.";
 "Could not read the data from the previous report." = "이전 보고서의 데이터를 읽지 못했습니다.";
 "Could not remove the data folder or restore the app.\nYour data remains in its original location.\nApp location: %1$@\nData error: %2$@\nRestore error: %3$@" = "보고서 폴더 제거에 실패했고 앱 복원도 완료하지 못했습니다.\n보고서는 원래 위치에 남아 있습니다.\n앱 위치: %1$@\n보고서 오류: %2$@\n복원 오류: %3$@";
+
+"Administrator permission required" = "관리자 권한 필요";
+"Homebrew needs administrator permission to finish this package operation. Enter your macOS account password. BrewPeek does not save it." = "패키지 작업을 완료하려면 Homebrew에 관리자 권한이 필요합니다. macOS 계정 비밀번호를 입력해 주세요. BrewPeek은 비밀번호를 저장하지 않습니다.";
+"Authenticate" = "인증";
+"Password" = "비밀번호";
+"Uninstalling: %@" = "삭제: %@";
+"Updating: %@" = "업데이트: %@";
+"Authentication was not accepted. Please try again." = "인증에 실패했습니다. 다시 입력해 주세요.";

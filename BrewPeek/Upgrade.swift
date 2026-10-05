@@ -195,8 +195,39 @@ final class Upgrade {
     let pipe = Pipe()
     task.executableURL = URL(fileURLWithPath: inventory.brew)
     task.arguments = arguments
-    task.environment = commandEnvironment().merging(environmentOverrides) { _, override in override
+    var environment = commandEnvironment().merging(environmentOverrides) { _, override in override
     }
+    var authenticationDirectory: URL?
+    defer {
+      if let directory = authenticationDirectory { try? FileManager.default.removeItem(at: directory) }
+    }
+    // Homebrew sanitizes arbitrary environment variables; the private askpass link identifies
+    // this one confirmed operation. The request file contains no credentials.
+    if ["upgrade", "uninstall"].contains(arguments.first ?? ""),
+      !arguments.contains("--dry-run"), let executable = Bundle.main.executableURL
+    {
+      let helper = executable.deletingLastPathComponent().appendingPathComponent("BrewPeekAskpass")
+      if FileManager.default.isExecutableFile(atPath: helper.path) {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+          "brewpeek-auth-" + UUID().uuidString)
+        try FileManager.default.createDirectory(
+          at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        authenticationDirectory = directory
+        var info = proc_bsdinfo()
+        guard proc_pidinfo(getpid(), PROC_PIDTBSDINFO, 0, &info,
+          Int32(MemoryLayout<proc_bsdinfo>.size)) == Int32(MemoryLayout<proc_bsdinfo>.size)
+        else { throw InventoryError(message: "Could not prepare administrator authentication.") }
+        let request: Record = ["pid": getpid(), "started": info.pbi_start_tvsec,
+          "microseconds": info.pbi_start_tvusec, "operation": arguments.joined(separator: " ")]
+        let file = directory.appendingPathComponent("request.json")
+        try JSONSerialization.data(withJSONObject: request).write(to: file, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
+        let link = directory.appendingPathComponent("askpass")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: helper)
+        environment["SUDO_ASKPASS"] = link.path
+      }
+    }
+    task.environment = environment
     task.standardInput = FileHandle.nullDevice
     task.standardOutput = pipe
     task.standardError = pipe

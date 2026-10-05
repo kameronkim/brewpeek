@@ -41,3 +41,11 @@
 "The saved inventory has an invalid format." = "The saved inventory has an invalid format.";
 "Could not read the data from the previous report." = "Could not read the data from the previous report.";
 "Could not remove the data folder or restore the app.\nYour data remains in its original location.\nApp location: %1$@\nData error: %2$@\nRestore error: %3$@" = "Could not remove the data folder or restore the app.\nYour data remains in its original location.\nApp location: %1$@\nData error: %2$@\nRestore error: %3$@";
+
+"Administrator permission required" = "Administrator permission required";
+"Homebrew needs administrator permission to finish this package operation. Enter your macOS account password. BrewPeek does not save it." = "Homebrew needs administrator permission to finish this package operation. Enter your macOS account password. BrewPeek does not save it.";
+"Authenticate" = "Authenticate";
+"Password" = "Password";
+"Uninstalling: %@" = "Uninstalling: %@";
+"Updating: %@" = "Updating: %@";
+"Authentication was not accepted. Please try again." = "Authentication was not accepted. Please try again.";
