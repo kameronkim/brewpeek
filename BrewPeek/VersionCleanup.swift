@@ -45,14 +45,14 @@ struct VersionCleanup {
       else
         formula.eligible_kegs_for_cleanup(quiet: true).reject(&:optlinked?)
       end
-      formula.installed_kegs.map do |keg|
+      formula.installed_kegs.sort_by(&:version).map do |keg|
         path = Pathname.new(keg)
         receipt = path/"INSTALL_RECEIPT.json"
         identity = [path.to_s, path.stat.ino, Digest::SHA256.file(receipt).hexdigest,
                     keg.linked?, keg.optlinked?].join("|")
         {"version" => keg.version.to_s, "fingerprint" => identity,
          "removable" => eligible.include?(keg)}
-      end.sort_by { |r| r.fetch("version") }
+      end
     end
     if request["selected"]
       formula.lock
