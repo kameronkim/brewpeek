@@ -252,9 +252,8 @@ extension DesktopApp {
           let pending = try RemovalTaskStore.finish(task, result: result, at: destination)
           if pending {
             result["recoveryID"] = task.id
-            result["pendingCleanup"] =
-              (result["packages"] as? [Record])?.first?["actualVersion"] as? String
-              == "Not installed"
+            result["pendingCleanup"] = result["verified"] as? Bool != true
+              || (result["packages"] as? [Record])?.first?["actualVersion"] as? String == "Not installed"
           }
           OperationInventory.append(
             to: &result, inventory: removal.engine.inventory, destination: destination,

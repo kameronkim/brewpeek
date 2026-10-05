@@ -239,7 +239,21 @@ extension PackageRemoval {
       exit = command.0
     }
     event(["kind": "verifying"])
-    let installed = try engine.installed()
+    let installed: [UpgradePackage]
+    do { installed = try engine.installed() } catch {
+      log.append("\n" + error.localizedDescription)
+      let rows = ([plan.task.root] + plan.task.dependencies).map { saved -> Record in
+        var row = saved.package.record
+        row["actualVersion"] = "Unknown"
+        row["outcome"] = "attention"
+        row["message"] = "Could not verify removal. Retry cleanup to review the current installation."
+        return row
+      }
+      return [
+        "kind": "result", "operation": "uninstall", "packages": rows,
+        "verified": false, "details": log.text, "exitCode": exit,
+      ]
+    }
     var root = plan.task.root.package.record
     let actualRoot = installed.first { $0.id == plan.task.root.package.id }
     root["actualVersion"] = actualRoot?.current.joined(separator: ", ") ?? "Not installed"
