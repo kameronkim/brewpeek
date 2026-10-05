@@ -254,9 +254,12 @@ extension PackageRemoval {
       var row = saved.package.record
       let actual = installed.first { $0.id == saved.package.id }
       row["actualVersion"] = actual?.current.joined(separator: ", ") ?? "Not installed"
-      row["outcome"] = actual == nil ? "uninstalled" : "failed"
-      row["message"] =
-        actual == nil ? "Uninstalled" : "Still installed. Retry cleanup to review it again."
+      let attempted = plan.packages.contains { $0.id == saved.package.id }
+      row["outcome"] = actual == nil ? (attempted && exit != 0 ? "attention" : "uninstalled") : "failed"
+      row["message"] = actual == nil
+        ? (attempted && exit != 0
+          ? "Removed, but Homebrew reported an error. Review activity." : "Uninstalled")
+        : "Still installed. Retry cleanup to review it again."
       return row
     }
     return [
