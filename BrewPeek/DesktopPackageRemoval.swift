@@ -3,8 +3,7 @@ import Cocoa
 extension DesktopApp {
   func preparePackageRemoval(key: String, requestID: String) {
     reportLoadID = nil
-    busy = true
-    updatePreparing = true
+    operationPhase = .preparing
     updateRequestID = requestID
     operationPlan = nil
     let control = UpgradePreparation()
@@ -39,9 +38,7 @@ extension DesktopApp {
   }
 
   func startPackageRemoval(_ plan: PackageRemovalPlan, requestID: String) {
-    busy = true
-    updateInProgress = true
-    updatePreparing = true
+    operationPhase = .rechecking
     updateRequestID = requestID
     operationPlan = nil
     let control = UpgradePreparation()
@@ -84,7 +81,7 @@ extension DesktopApp {
               ])
               return false
             }
-            self.updatePreparing = false
+            self.operationPhase = .running
             self.preparationControl = nil
             self.sendUpdate(["kind": "started", "plan": fresh.record, "requestID": requestID])
             return true
@@ -129,8 +126,7 @@ extension DesktopApp {
           }
           let completed = result
           DispatchQueue.main.async {
-            self.busy = false
-            self.updateInProgress = false
+            self.operationPhase = .idle
             self.updateRequestID = nil
             self.sendUpdate(completed)
           }
@@ -140,8 +136,7 @@ extension DesktopApp {
           if self.updatePreparing {
             guard self.finishPreparation(requestID) else { return }
           }
-          self.busy = false
-          self.updateInProgress = false
+          self.operationPhase = .idle
           self.updateRequestID = nil
           self.sendUpdate([
             "kind": "error", "message": error.localizedDescription, "requestID": requestID,
@@ -156,7 +151,7 @@ extension DesktopApp {
   func restorePendingRemoval() {
     guard !recoveryChecked, !busy, inventoryRefreshState == "idle" else { return }
     recoveryChecked = true
-    busy = true
+    auxiliaryBusy = true
     sendUpdate(["kind": "recoveryChecking"])
     let destination = output
     DispatchQueue.global(qos: .userInitiated).async {
@@ -172,7 +167,7 @@ extension DesktopApp {
         }
       }
       DispatchQueue.main.async {
-        self.busy = false
+        self.auxiliaryBusy = false
         switch result {
         case .success(let record): self.sendUpdate(record ?? ["kind": "recoveryEmpty"])
         case .failure(let error):
@@ -184,8 +179,7 @@ extension DesktopApp {
 
   func prepareSavedCleanup(id: String, requestID: String) {
     reportLoadID = nil
-    busy = true
-    updatePreparing = true
+    operationPhase = .preparing
     updateRequestID = requestID
     operationPlan = nil
     let control = UpgradePreparation()
@@ -219,9 +213,7 @@ extension DesktopApp {
   }
 
   func startSavedCleanup(_ plan: CleanupPlan, requestID: String) {
-    busy = true
-    updateInProgress = true
-    updatePreparing = true
+    operationPhase = .rechecking
     updateRequestID = requestID
     operationPlan = nil
     let control = UpgradePreparation()
@@ -253,7 +245,7 @@ extension DesktopApp {
               ])
               return false
             }
-            self.updatePreparing = false
+            self.operationPhase = .running
             self.preparationControl = nil
             self.sendUpdate(["kind": "started", "plan": fresh.record, "requestID": requestID])
             return true
@@ -277,8 +269,7 @@ extension DesktopApp {
           result["requestID"] = requestID
           let completed = result
           DispatchQueue.main.async {
-            self.busy = false
-            self.updateInProgress = false
+            self.operationPhase = .idle
             self.updateRequestID = nil
             self.sendUpdate(completed)
           }
@@ -286,8 +277,7 @@ extension DesktopApp {
       } catch {
         DispatchQueue.main.async {
           if self.updatePreparing { guard self.finishPreparation(requestID) else { return } }
-          self.busy = false
-          self.updateInProgress = false
+          self.operationPhase = .idle
           self.updateRequestID = nil
           self.sendUpdate([
             "kind": "error", "message": error.localizedDescription, "requestID": requestID,
@@ -300,7 +290,7 @@ extension DesktopApp {
   }
 
   func discardSavedCleanup(id: String, requestID: String) {
-    busy = true
+    auxiliaryBusy = true
     updateRequestID = requestID
     let destination = output
     DispatchQueue.global(qos: .userInitiated).async {
@@ -309,13 +299,13 @@ extension DesktopApp {
           try RemovalTaskStore.clear(at: destination, id: id)
         }
         DispatchQueue.main.async {
-          self.busy = false
+          self.auxiliaryBusy = false
           self.updateRequestID = nil
           self.sendUpdate(["kind": "cleanupDiscarded", "requestID": requestID])
         }
       } catch {
         DispatchQueue.main.async {
-          self.busy = false
+          self.auxiliaryBusy = false
           self.updateRequestID = nil
           self.sendUpdate([
             "kind": "error", "message": error.localizedDescription, "requestID": requestID,

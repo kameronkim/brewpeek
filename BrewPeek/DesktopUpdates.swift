@@ -76,8 +76,7 @@ extension DesktopApp {
 
   private func prepareUpdate(keys: [String], requestID: String) {
     reportLoadID = nil
-    busy = true
-    updatePreparing = true
+    operationPhase = .preparing
     updateRequestID = requestID
     operationPlan = nil
     sendUpdate(["kind": "checking", "requestID": requestID])
@@ -118,9 +117,7 @@ extension DesktopApp {
       ])
       return
     }
-    busy = true
-    updateInProgress = true
-    updatePreparing = true
+    operationPhase = .rechecking
     operationPlan = nil
     sendUpdate([
       "kind": "checking", "message": "Rechecking the confirmed plan…", "requestID": requestID,
@@ -161,8 +158,7 @@ extension DesktopApp {
             }.joined(separator: " ")
           let completed = result
           DispatchQueue.main.async {
-            self.busy = false
-            self.updateInProgress = false
+            self.operationPhase = .idle
             self.updateRequestID = nil
             self.sendUpdate(completed)
           }
@@ -174,8 +170,7 @@ extension DesktopApp {
           } else {
             self.updateRequestID = nil
           }
-          self.busy = false
-          self.updateInProgress = false
+          self.operationPhase = .idle
           self.sendUpdate([
             "kind": "error", "message": error.localizedDescription, "requestID": requestID,
           ])
@@ -200,7 +195,7 @@ extension DesktopApp {
       ])
       return false
     }
-    updatePreparing = false
+    operationPhase = .running
     preparationControl = nil
     sendUpdate(["kind": "started", "plan": plan.record, "requestID": requestID])
     return true
@@ -208,9 +203,7 @@ extension DesktopApp {
 
   /// Runs on the main queue, including the final cancellation gate before mutation.
   func finishPreparation(_ requestID: String) -> Bool {
-    busy = false
-    updatePreparing = false
-    updateInProgress = false
+    operationPhase = .idle
     preparationControl = nil
     guard updateRequestID == requestID else {
       operationPlan = nil

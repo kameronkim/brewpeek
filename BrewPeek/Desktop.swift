@@ -1,6 +1,16 @@
 import Cocoa
 import WebKit
 
+enum PackageOperationPhase {
+  case idle
+  case preparing
+  case rechecking
+  case running
+
+  var isPreparing: Bool { self == .preparing || self == .rechecking }
+  var isExecuting: Bool { self == .rechecking || self == .running }
+}
+
 enum PackageOperationPlan {
   case update(UpgradePlan)
   case uninstall(PackageRemovalPlan)
@@ -22,10 +32,13 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   var hasDisplayedData = false
   var inventoryRefreshState = "idle"
   var collectingInventory: Inventory?
-  var busy = false
-  var updateInProgress = false
+  // Inventory refresh, recovery inspection and app removal have separate lifetimes.
+  var auxiliaryBusy = false
+  var operationPhase: PackageOperationPhase = .idle
+  var busy: Bool { auxiliaryBusy || operationPhase != .idle }
+  var updateInProgress: Bool { operationPhase.isExecuting }
   var updateRequestID: String?
-  var updatePreparing = false
+  var updatePreparing: Bool { operationPhase.isPreparing }
   var preparationControl: UpgradePreparation?
   var operationPlan: PackageOperationPlan?
   var hasOperationPlan: Bool { operationPlan != nil }
@@ -164,7 +177,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     else { return }
     reportLoadID = nil
     recoveryChecked = false
-    busy = true
+    auxiliaryBusy = true
     inventoryRefreshState = "refreshing"
     refreshButton.isEnabled = false
     refreshButton.isHidden = true
@@ -201,7 +214,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   }
   func finishRefresh(error: Error? = nil) {
     collectingInventory = nil
-    busy = false
+    auxiliaryBusy = false
     inventoryRefreshState = error == nil ? "idle" : "failed"
     refreshButton.isEnabled = true
     if let error {
@@ -303,7 +316,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   @objc func removeApp() {
     guard !busy, !hasOperationPlan, updateRequestID == nil
     else { return }
-    busy = true
+    auxiliaryBusy = true
     refreshButton.isEnabled = false
     let app = Bundle.main.bundleURL
     let reports = output.deletingLastPathComponent()
@@ -317,16 +330,16 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     alert.addButton(withTitle: NSLocalizedString("Move to Trash", comment: ""))
     alert.beginSheetModal(for: window) { response in
       guard response == .alertSecondButtonReturn else {
-        self.busy = false
+        self.auxiliaryBusy = false
         self.refreshButton.isEnabled = true
         return
       }
       do {
         try DesktopRemoval.remove(app: app, reports: reports)
-        self.busy = false
+        self.auxiliaryBusy = false
         NSApp.terminate(nil)
       } catch {
-        self.busy = false
+        self.auxiliaryBusy = false
         self.refreshButton.isEnabled = true
         self.showError(error.localizedDescription)
       }

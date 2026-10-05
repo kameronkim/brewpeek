@@ -3,8 +3,7 @@ import Cocoa
 extension DesktopApp {
   func prepareVersionCleanup(key: String, requestID: String) {
     reportLoadID = nil
-    busy = true
-    updatePreparing = true
+    operationPhase = .preparing
     updateRequestID = requestID
     operationPlan = nil
     let control = UpgradePreparation()
@@ -35,9 +34,7 @@ extension DesktopApp {
     guard !selected.isEmpty, Set(selected).count == selected.count,
       selected.allSatisfy({ v in plan.versions.contains { $0.version == v && $0.removable } })
     else { return }
-    busy = true
-    updateInProgress = true
-    updatePreparing = true
+    operationPhase = .rechecking
     updateRequestID = requestID
     operationPlan = nil
     let control = UpgradePreparation()
@@ -65,7 +62,7 @@ extension DesktopApp {
               ])
               return false
             }
-            self.updatePreparing = false
+            self.operationPhase = .running
             self.preparationControl = nil
             var record = fresh.record
             record["packages"] = (record["packages"] as? [Record])?.filter {
@@ -86,8 +83,7 @@ extension DesktopApp {
           result["requestID"] = requestID
           let completed = result
           DispatchQueue.main.async {
-            self.busy = false
-            self.updateInProgress = false
+            self.operationPhase = .idle
             self.updateRequestID = nil
             self.sendUpdate(completed)
           }
@@ -95,8 +91,7 @@ extension DesktopApp {
       } catch {
         DispatchQueue.main.async {
           if self.updatePreparing { guard self.finishPreparation(requestID) else { return } }
-          self.busy = false
-          self.updateInProgress = false
+          self.operationPhase = .idle
           self.updateRequestID = nil
           self.sendUpdate([
             "kind": "error", "message": error.localizedDescription, "requestID": requestID,
