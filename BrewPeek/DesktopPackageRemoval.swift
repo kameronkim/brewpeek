@@ -2,14 +2,8 @@ import Cocoa
 
 extension DesktopApp {
   func preparePackageRemoval(key: String, requestID: String) {
-    reportLoadID = nil
-    operationPhase = .preparing
-    updateRequestID = requestID
-    operationPlan = nil
-    let control = UpgradePreparation()
-    preparationControl = control
+    let control = beginPackagePreparation(requestID: requestID, operation: "uninstall")
     let destination = output
-    sendUpdate(["kind": "checking", "operation": "uninstall", "requestID": requestID])
     DispatchQueue.global(qos: .userInitiated).async {
       do {
         let removal = PackageRemoval(brew: try Inventory.locateBrew())
@@ -38,15 +32,9 @@ extension DesktopApp {
   }
 
   func startPackageRemoval(_ plan: PackageRemovalPlan, requestID: String) {
-    operationPhase = .rechecking
-    updateRequestID = requestID
-    operationPlan = nil
-    let control = UpgradePreparation()
-    preparationControl = control
+    let control = beginPackagePreparation(
+      requestID: requestID, rechecking: true, message: "Rechecking the selected package…")
     let destination = output
-    sendUpdate([
-      "kind": "checking", "message": "Rechecking the selected package…", "requestID": requestID,
-    ])
     DispatchQueue.global(qos: .userInitiated).async {
       do {
         let removal = PackageRemoval(brew: try Inventory.locateBrew())
@@ -167,14 +155,8 @@ extension DesktopApp {
   }
 
   func prepareSavedCleanup(id: String, requestID: String) {
-    reportLoadID = nil
-    operationPhase = .preparing
-    updateRequestID = requestID
-    operationPlan = nil
-    let control = UpgradePreparation()
-    preparationControl = control
+    let control = beginPackagePreparation(requestID: requestID, operation: "cleanup")
     let destination = output
-    sendUpdate(["kind": "checking", "operation": "cleanup", "requestID": requestID])
     DispatchQueue.global(qos: .userInitiated).async {
       do {
         let plan = try Upgrade.withLock(at: destination) {
@@ -202,16 +184,10 @@ extension DesktopApp {
   }
 
   func startSavedCleanup(_ plan: CleanupPlan, requestID: String) {
-    operationPhase = .rechecking
-    updateRequestID = requestID
-    operationPlan = nil
-    let control = UpgradePreparation()
-    preparationControl = control
+    let control = beginPackagePreparation(
+      requestID: requestID, rechecking: true, operation: "cleanup",
+      message: "Rechecking remaining dependencies…")
     let destination = output
-    sendUpdate([
-      "kind": "checking", "operation": "cleanup", "message": "Rechecking remaining dependencies…",
-      "requestID": requestID,
-    ])
     DispatchQueue.global(qos: .userInitiated).async {
       do {
         let removal = PackageRemoval(brew: try Inventory.locateBrew())

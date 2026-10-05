@@ -75,15 +75,28 @@ extension DesktopApp {
     }
   }
 
-  private func prepareUpdate(keys: [String], requestID: String) {
+  /// Register read-only work before notifying the web UI, on the main queue.
+  func beginPackagePreparation(
+    requestID: String, rechecking: Bool = false,
+    operation: String? = nil, message: String? = nil
+  ) -> UpgradePreparation {
     reportLoadID = nil
-    operationPhase = .preparing
+    operationPhase = rechecking ? .rechecking : .preparing
     updateRequestID = requestID
+    cancelledPreparationRequestID = nil
     operationPlan = nil
-    sendUpdate(["kind": "checking", "requestID": requestID])
-    let destination = output
     let control = UpgradePreparation()
     preparationControl = control
+    var event: Record = ["kind": "checking", "requestID": requestID]
+    if let operation { event["operation"] = operation }
+    if let message { event["message"] = message }
+    sendUpdate(event)
+    return control
+  }
+
+  private func prepareUpdate(keys: [String], requestID: String) {
+    let control = beginPackagePreparation(requestID: requestID)
+    let destination = output
     DispatchQueue.global(qos: .userInitiated).async {
       do {
         let engine = Upgrade(brew: try Inventory.locateBrew())
@@ -118,14 +131,9 @@ extension DesktopApp {
       ])
       return
     }
-    operationPhase = .rechecking
-    operationPlan = nil
-    sendUpdate([
-      "kind": "checking", "message": "Rechecking the confirmed plan…", "requestID": requestID,
-    ])
+    let control = beginPackagePreparation(
+      requestID: requestID, rechecking: true, message: "Rechecking the confirmed plan…")
     let destination = output
-    let control = UpgradePreparation()
-    preparationControl = control
     DispatchQueue.global(qos: .userInitiated).async {
       do {
         let engine = Upgrade(brew: try Inventory.locateBrew())

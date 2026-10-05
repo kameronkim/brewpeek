@@ -2,14 +2,8 @@ import Cocoa
 
 extension DesktopApp {
   func prepareVersionCleanup(key: String, requestID: String) {
-    reportLoadID = nil
-    operationPhase = .preparing
-    updateRequestID = requestID
-    operationPlan = nil
-    let control = UpgradePreparation()
-    preparationControl = control
+    let control = beginPackagePreparation(requestID: requestID, operation: "version-cleanup")
     let destination = output
-    sendUpdate(["kind": "checking", "operation": "version-cleanup", "requestID": requestID])
     DispatchQueue.global(qos: .userInitiated).async {
       do {
         let plan = try Upgrade.withLock(at: destination) {
@@ -34,16 +28,10 @@ extension DesktopApp {
     guard !selected.isEmpty, Set(selected).count == selected.count,
       selected.allSatisfy({ v in plan.versions.contains { $0.version == v && $0.removable } })
     else { return }
-    operationPhase = .rechecking
-    updateRequestID = requestID
-    operationPlan = nil
-    let control = UpgradePreparation()
-    preparationControl = control
+    let control = beginPackagePreparation(
+      requestID: requestID, rechecking: true, operation: "version-cleanup",
+      message: "Rechecking installed versions…")
     let destination = output
-    sendUpdate([
-      "kind": "checking", "operation": "version-cleanup", "requestID": requestID,
-      "message": "Rechecking installed versions…",
-    ])
     DispatchQueue.global(qos: .userInitiated).async {
       do {
         let cleanup = VersionCleanup(brew: try Inventory.locateBrew())
