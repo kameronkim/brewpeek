@@ -84,7 +84,7 @@ function compare(a, b) {
   return (state.direction === 'asc' ? v : -v) || a.name.localeCompare(b.name);
 }
 function field(label, content, wide = false) {
-  return `<div class="detail-field${wide ? ' wide' : ''}"><dt>${label}</dt><dd>${content}</dd></div>`;
+  return `<div class="detail-field${wide === 'full' ? ' full' : wide ? ' wide' : ''}"><dt>${label}</dt><dd>${content}</dd></div>`;
 }
 function detail(p) {
   let fields =
@@ -115,10 +115,14 @@ function detail(p) {
             .join('<br>')
         : p.appExpected
           ? 'App bundle not found at the registered location'
-          : 'No app bundle expected'
+          : 'No app bundle expected',
+      'full'
     );
   }
-  return `<div class="details-grid"><dl style="display:contents">${fields}</dl></div>`;
+  const actions = p.type === 'cask' || p.direct === true
+    ? `<div class="detail-actions"><button class="subtle-btn uninstall-btn" data-uninstall="${esc(key(p))}">Uninstall</button></div>`
+    : '';
+  return `<div class="details-grid"><dl style="display:contents">${fields}</dl>${actions}</div>`;
 }
 function row(p) {
   const id = 'detail-' + encodeURIComponent(key(p)),

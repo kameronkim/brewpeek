@@ -1564,3 +1564,12 @@ html,
     animation: none;
   }
 }
+
+/* Cask removal shares the package operation and confirmation surfaces. */
+.detail-field.full, .detail-actions { grid-column: 1 / -1; }
+.detail-actions { display: flex; justify-content: flex-end; }
+#confirm[data-operation='uninstall'] .confirm-table col:first-child { width: 52% !important; }
+#confirm[data-operation='uninstall'] .confirm-table col:nth-child(2) { width: 48% !important; }
+#confirm[data-operation='uninstall'] .confirm-table col:nth-child(3),
+#confirm[data-operation='uninstall'] .confirm-table th:nth-child(3),
+#confirm[data-operation='uninstall'] .confirm-table td:nth-child(3) { display: none; }
