@@ -76,26 +76,53 @@ final class Upgrade {
       arguments, environmentOverrides: environmentOverrides, streaming: streaming)
   }
   func json(_ arguments: [String], control: UpgradePreparation? = nil) throws -> Record {
-    let installedQuery = arguments == ["info", "--json=v2", "--installed"]
-    if installedQuery { latestInstalledInfo = nil }
+    if arguments == ["info", "--json=v2", "--installed"] {
+      return try installedMetadata(control: control).raw
+    }
+    return try readJSON(arguments, control: control)
+  }
+  private func readJSON(_ arguments: [String], control: UpgradePreparation?) throws -> Record {
     let text =
       try control.map { try readOnly(arguments, control: $0) }
       ?? inventory.run(inventory.brew, arguments)
     guard let object = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? Record else {
       throw InventoryError(message: "Homebrew returned invalid package information.")
     }
-    if installedQuery {
-      try Inventory.validateInstalledInfo(object)
-      latestInstalledInfo = object
-    }
     return object
   }
+  /// Validate once, retaining the raw snapshot for inventory and typed fields for operations.
+  func installedMetadata(control: UpgradePreparation? = nil) throws
+    -> (raw: Record, installed: InstalledPackageInfo)
+  {
+    latestInstalledInfo = nil
+    let raw = try readJSON(["info", "--json=v2", "--installed"], control: control)
+    let installed = try Inventory.validateInstalledInfo(raw)
+    latestInstalledInfo = raw
+    return (raw, installed)
+  }
+  /// Plan metadata may describe new dependencies with no installed receipts.
   static func packages(_ info: Record, caskroom: String? = nil) -> [UpgradePackage] {
+    let formulae = (info["formulae"] as? [Record] ?? []).compactMap { raw -> InstalledFormulaInfo? in
+      guard let name = raw["name"] as? String else { return nil }
+      let receipts = raw["installed"] as? [Record] ?? []
+      return InstalledFormulaInfo(
+        raw: raw, name: name, fullName: raw["full_name"] as? String ?? name,
+        receipts: receipts, versions: receipts.compactMap { $0["version"] as? String })
+    }
+    let casks = (info["casks"] as? [Record] ?? []).compactMap { raw -> InstalledCaskInfo? in
+      guard let name = raw["token"] as? String else { return nil }
+      let versions = raw["installed"] as? [String]
+        ?? (raw["installed"] as? String).map { [$0] } ?? []
+      return InstalledCaskInfo(
+        raw: raw, name: name, fullName: raw["full_token"] as? String ?? name, versions: versions)
+    }
+    return packages(InstalledPackageInfo(formulae: formulae, casks: casks), caskroom: caskroom)
+  }
+  static func packages(_ info: InstalledPackageInfo, caskroom: String? = nil) -> [UpgradePackage] {
     var result: [UpgradePackage] = []
-    for f in info["formulae"] as? [Record] ?? [] {
-      guard let name = f["name"] as? String else { continue }
-      let full = f["full_name"] as? String ?? name
-      let installed = f["installed"] as? [Record] ?? []
+    for item in info.formulae {
+      let f = item.raw
+      let installed = item.receipts
       let revision = f["revision"] as? Int ?? 0
       let stable = (f["versions"] as? Record)?["stable"] as? String ?? ""
       let dependencies =
@@ -107,17 +134,15 @@ final class Upgrade {
         }
       result.append(
         UpgradePackage(
-          name: name, fullName: full, type: "formula",
-          current: installed.compactMap { $0["version"] as? String },
+          name: item.name, fullName: item.fullName, type: "formula",
+          current: item.versions,
           next: stable + (revision > 0 ? "_\(revision)" : ""),
           receipt: installed.map { String(describing: $0["time"] ?? "") }.joined(separator: ","),
           apps: [], reason: "Dependency",
           dependencies: dependencies.map { relationshipID($0, type: "formula") }))
     }
-    for c in info["casks"] as? [Record] ?? [] {
-      guard let name = c["token"] as? String else { continue }
-      let full = c["full_token"] as? String ?? name
-      let versions = c["installed"] as? [String] ?? (c["installed"] as? String).map { [$0] } ?? []
+    for item in info.casks {
+      let c = item.raw
       let apps = CaskApps.paths(c, caskroom: caskroom)
       let dependencies = c["depends_on"] as? Record ?? [:]
       let dependencyIDs = ["formula", "cask"].flatMap { type in
@@ -125,7 +150,7 @@ final class Upgrade {
       }
       result.append(
         UpgradePackage(
-          name: name, fullName: full, type: "cask", current: versions,
+          name: item.name, fullName: item.fullName, type: "cask", current: item.versions,
           next: c["version"] as? String ?? "",
           receipt: String(describing: c["installed_time"] ?? ""), apps: apps, reason: "Dependency",
           dependencies: dependencyIDs))
@@ -169,11 +194,9 @@ final class Upgrade {
       return package
     }
   }
-  /// Share installed app path resolution with update and uninstall preparation.
-  func resolvedPackages(_ info: Record, control: UpgradePreparation? = nil) throws
-    -> [UpgradePackage]
-  {
-    if caskroom == nil, (info["casks"] as? [Record] ?? []).contains(where: CaskApps.needsAppDirectory) {
+  /// Share app path resolution without reparsing validated installed fields.
+  private func resolveCaskroom(_ casks: [Record], control: UpgradePreparation?) throws {
+    if caskroom == nil, casks.contains(where: CaskApps.needsAppDirectory) {
       let path = try control.map { try readOnly(["--caskroom"], control: $0) }
         ?? inventory.run(inventory.brew, ["--caskroom"])
       let directory = path.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -182,10 +205,21 @@ final class Upgrade {
       }
       caskroom = directory
     }
+  }
+  func resolvedPackages(_ info: Record, control: UpgradePreparation? = nil) throws
+    -> [UpgradePackage]
+  {
+    try resolveCaskroom(info["casks"] as? [Record] ?? [], control: control)
+    return Self.packages(info, caskroom: caskroom)
+  }
+  func resolvedPackages(_ info: InstalledPackageInfo, control: UpgradePreparation? = nil) throws
+    -> [UpgradePackage]
+  {
+    try resolveCaskroom(info.casks.map(\.raw), control: control)
     return Self.packages(info, caskroom: caskroom)
   }
   func installed(control: UpgradePreparation? = nil) throws -> [UpgradePackage] {
-    try resolvedPackages(json(["info", "--json=v2", "--installed"], control: control), control: control)
+    try resolvedPackages(installedMetadata(control: control).installed, control: control)
   }
   /// Read only recognized plan blocks, then resolve every name through Homebrew JSON.
   static func plannedNames(_ text: String) throws -> [String] {

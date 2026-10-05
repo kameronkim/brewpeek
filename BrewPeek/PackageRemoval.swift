@@ -123,7 +123,7 @@ struct PackageRemoval {
     else {
       throw InventoryError(message: "Select an installed package to uninstall.")
     }
-    let info = try engine.json(["info", "--json=v2", "--installed"], control: control)
+    let info = try engine.installedMetadata(control: control).installed
     let installed = try engine.resolvedPackages(info, control: control)
     guard
       var package = installed.first(where: {
@@ -133,10 +133,7 @@ struct PackageRemoval {
       throw InventoryError(message: "This package is no longer installed. Refresh and try again.")
     }
     if package.type == "formula" {
-      let formula = (info["formulae"] as? [Record] ?? []).first {
-        ($0["full_name"] as? String ?? $0["name"] as? String) == package.fullName
-      }
-      let receipts = formula?["installed"] as? [Record] ?? []
+      let receipts = info.formulae.first { $0.fullName == package.fullName }?.receipts ?? []
       guard receipts.contains(where: { $0["installed_on_request"] as? Bool == true }) else {
         throw InventoryError(
           message:
