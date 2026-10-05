@@ -362,7 +362,8 @@ final class Upgrade {
       return package
     }
   }
-  private func resolvedPackages(_ info: Record, control: UpgradePreparation? = nil) throws
+  /// Share installed app path resolution with update and uninstall preparation.
+  func resolvedPackages(_ info: Record, control: UpgradePreparation? = nil) throws
     -> [UpgradePackage]
   {
     if caskroom == nil, (info["casks"] as? [Record] ?? []).contains(where: CaskApps.needsAppDirectory) {

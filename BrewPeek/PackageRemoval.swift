@@ -124,7 +124,7 @@ struct PackageRemoval {
       throw InventoryError(message: "Select an installed package to uninstall.")
     }
     let info = try engine.json(["info", "--json=v2", "--installed"], control: control)
-    let installed = Upgrade.packages(info)
+    let installed = try engine.resolvedPackages(info, control: control)
     guard
       var package = installed.first(where: {
         $0.id == key && !$0.current.isEmpty
