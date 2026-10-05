@@ -209,8 +209,18 @@ final class Upgrade {
   func resolvedPackages(_ info: Record, control: UpgradePreparation? = nil) throws
     -> [UpgradePackage]
   {
-    try resolveCaskroom(info["casks"] as? [Record] ?? [], control: control)
-    return Self.packages(info, caskroom: caskroom)
+    guard let casks = info["casks"] as? [Record] else {
+      throw InventoryError(message: "Homebrew returned incomplete update plan metadata.")
+    }
+    var metadata = info
+    // Homebrew represents an uninstalled Cask with null rather than an installed version.
+    metadata["casks"] = casks.map { raw -> Record in
+      var cask = raw
+      if cask["installed"] == nil || cask["installed"] is NSNull { cask["installed"] = [String]() }
+      return cask
+    }
+    let validated = try Inventory.validateInstalledInfo(metadata)
+    return try resolvedPackages(validated, control: control)
   }
   func resolvedPackages(_ info: InstalledPackageInfo, control: UpgradePreparation? = nil) throws
     -> [UpgradePackage]
@@ -311,13 +321,17 @@ final class Upgrade {
     }
     let metadata = try json(["info", "--json=v2"] + arguments, control: control)
     var packages = try resolvedPackages(metadata, control: control)
+    func matches(_ package: UpgradePackage, _ name: String) -> Bool {
+      package.fullName == name || package.name == name || package.argument == name
+    }
     guard !packages.isEmpty,
-      packages.allSatisfy({ Self.validName($0.fullName) && !$0.next.isEmpty })
+      packages.allSatisfy({ Self.validName($0.fullName) && !$0.next.isEmpty }),
+      names.allSatisfy({ name in packages.contains { matches($0, name) } }),
+      packages.allSatisfy({ package in names.contains { matches(package, $0) } })
     else {
       throw InventoryError(message: "Could not resolve the versions in Homebrew's update plan.")
     }
-    var seen = Set<String>()
-    packages = packages.filter { seen.insert($0.id).inserted }.map { p in
+    packages = packages.map { p in
       var p = p
       p.reason =
         selected.contains(where: { $0.id == p.id })
