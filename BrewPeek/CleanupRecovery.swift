@@ -222,7 +222,9 @@ extension PackageRemoval {
         "processed": 0,
       ])
       let command = try engine.command(
-        ["uninstall", "--formula"] + plan.packages.map(\.argument),
+        ["uninstall", "--formula"]
+          + (plan.packages.contains { $0.current.count > 1 } ? ["--force"] : [])
+          + plan.packages.map(\.argument),
         environmentOverrides: ["HOMEBREW_NO_AUTOREMOVE": "1"]
       ) { line in
         log.append(line + "\n")

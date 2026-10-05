@@ -114,12 +114,17 @@ extension DesktopApp {
           } catch { result["refreshError"] = error.localizedDescription }
           result["retryKeys"] = [fresh.package.id]
           result["requestID"] = requestID
+          var command = [
+            removal.engine.inventory.brew, "uninstall",
+            fresh.package.type == "cask" ? "--cask" : "--formula",
+          ]
+          if fresh.package.type == "formula" && fresh.package.current.count > 1 {
+            command.append("--force")
+          }
+          command.append(fresh.package.argument)
           result["command"] =
             "HOMEBREW_NO_AUTOREMOVE=1 "
-            + [
-              removal.engine.inventory.brew, "uninstall",
-              fresh.package.type == "cask" ? "--cask" : "--formula", fresh.package.argument,
-            ]
+            + command
             .map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }.joined(
               separator: " ")
           if (result["packages"] as? [Record])?.first?["actualVersion"] as? String

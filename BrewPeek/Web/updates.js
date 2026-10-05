@@ -194,7 +194,7 @@ function showPlan(plan, changed) {
       : plan.selectedCount === 1 ? 'Update package?' : `Update ${plan.selectedCount} packages?`;
   $('confirm-copy').textContent =
     (changed ? 'The plan changed. Review it before continuing. ' : '') +
-    (operationKind === 'uninstall' ? `Homebrew will uninstall this ${plan.packages[0].type === 'cask' ? 'Cask' : 'Formula'}${plan.packages.length > 1 ? ` and remove ${plan.packages.length - 1} unused ${plan.packages.length === 2 ? 'dependency' : 'dependencies'}` : ''}. Shared and directly installed dependencies are kept.` : `${plan.selectedCount} selected · ${plan.packages.length - plan.selectedCount} additional changes.`) +
+    (operationKind === 'uninstall' ? `Homebrew will uninstall this ${plan.packages[0].type === 'cask' ? 'Cask' : 'Formula'}${plan.packages.length > 1 ? ` and remove ${plan.packages.length - 1} unused ${plan.packages.length === 2 ? 'dependency' : 'dependencies'}` : ''}. ${plan.packages[0].type === 'formula' && plan.packages[0].installedVersions?.length > 1 ? 'All installed versions of this Formula will be removed. ' : ''}Shared and directly installed dependencies are kept.` : `${plan.selectedCount} selected · ${plan.packages.length - plan.selectedCount} additional changes.`) +
     (plan.excluded?.length ? ` Homebrew excluded: ${plan.excluded.join(', ')}.` : '');
   $('confirm-list').innerHTML = plan.packages
     .map(

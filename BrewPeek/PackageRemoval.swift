@@ -15,6 +15,8 @@ struct PackageRemovalPlan {
       "packages": packages.map { p -> Record in
         var item = p.record
         item["action"] = "uninstall"
+        item["availableVersion"] = "Not installed"
+        item["installedVersions"] = p.current
         return item
       },
     ]
@@ -193,9 +195,12 @@ struct PackageRemoval {
     let package = plan.package
     states[package.id] = "Uninstalling…"
     progress(0)
-    let packageExit = try command([
-      "uninstall", package.type == "cask" ? "--cask" : "--formula", package.argument,
-    ])
+    let packageExit = try command(
+      [
+        "uninstall", package.type == "cask" ? "--cask" : "--formula",
+      ] + (package.type == "formula" && package.current.count > 1 ? ["--force"] : []) + [
+        package.argument
+      ])
     var dependencyExit: Int32 = 0
     var kept = Set<String>()
     var attempted = Set<String>()
@@ -224,7 +229,10 @@ struct PackageRemoval {
         for id in kept { states[id] = "Kept — no longer eligible for removal" }
         progress(1)
         if !targets.isEmpty {
-          dependencyExit = try command(["uninstall", "--formula"] + targets.map(\.argument))
+          dependencyExit = try command(
+            ["uninstall", "--formula"]
+              + (targets.contains { $0.current.count > 1 } ? ["--force"] : [])
+              + targets.map(\.argument))
         }
       }
     } catch {
