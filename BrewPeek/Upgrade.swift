@@ -88,6 +88,7 @@ final class Upgrade {
   let inventory: Inventory
   private var caskroom: String?
   private let process: BrewProcess
+  private(set) var latestInstalledInfo: Record?
   init(brew: String) {
     inventory = Inventory(brew: brew)
     process = BrewProcess(brew: brew)
@@ -111,14 +112,24 @@ final class Upgrade {
     _ arguments: [String], environmentOverrides: [String: String] = [:],
     streaming: ((String) -> Void)? = nil
   ) throws -> (Int32, String) {
-    try process.command(arguments, environmentOverrides: environmentOverrides, streaming: streaming)
+    latestInstalledInfo = nil
+    return try process.command(
+      arguments, environmentOverrides: environmentOverrides, streaming: streaming)
   }
   func json(_ arguments: [String], control: UpgradePreparation? = nil) throws -> Record {
+    let installedQuery = arguments == ["info", "--json=v2", "--installed"]
+    if installedQuery { latestInstalledInfo = nil }
     let text =
       try control.map { try readOnly(arguments, control: $0) }
       ?? inventory.run(inventory.brew, arguments)
     guard let object = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? Record else {
       throw InventoryError(message: "Homebrew returned invalid package information.")
+    }
+    if installedQuery {
+      guard object["formulae"] is [Record], object["casks"] is [Record] else {
+        throw InventoryError(message: "Homebrew returned incomplete installed package information.")
+      }
+      latestInstalledInfo = object
     }
     return object
   }

@@ -196,12 +196,23 @@ final class Inventory {
     }
   }
   func collect(
-    refreshMetadata: Bool = true, previous: Record? = nil, invalidatingSizes: Set<String> = []
+    refreshMetadata: Bool = true, previous: Record? = nil, invalidatingSizes: Set<String> = [],
+    installedInfo: Record? = nil
   ) throws -> Record {
     let updates = checkUpdates(refreshMetadata: refreshMetadata)
-    let text = try run(brew, ["info", "--json=v2", "--installed"])
-    guard let raw = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? Record,
-      let formulae = raw["formulae"] as? [Record], let casks = raw["casks"] as? [Record]
+    try checkCancellation()
+    let raw: Record
+    if let installedInfo {
+      raw = installedInfo
+    } else {
+      let text = try run(brew, ["info", "--json=v2", "--installed"])
+      guard let value = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? Record else {
+        throw InventoryError(
+          message: NSLocalizedString("The Homebrew data has an invalid format.", comment: ""))
+      }
+      raw = value
+    }
+    guard let formulae = raw["formulae"] as? [Record], let casks = raw["casks"] as? [Record]
     else {
       throw InventoryError(
         message: NSLocalizedString("The Homebrew data has an invalid format.", comment: ""))

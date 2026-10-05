@@ -82,7 +82,7 @@ extension DesktopApp {
           }
           OperationInventory.append(
             to: &result, inventory: cleanup.engine.inventory, destination: destination,
-            invalidatingSizes: [fresh.key])
+            invalidatingSizes: [fresh.key], installedInfo: cleanup.engine.latestInstalledInfo)
           result["requestID"] = requestID
           let completed = result
           DispatchQueue.main.async {

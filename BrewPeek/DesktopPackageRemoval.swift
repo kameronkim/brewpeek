@@ -106,7 +106,7 @@ extension DesktopApp {
           }
           OperationInventory.append(
             to: &result, inventory: removal.engine.inventory, destination: destination,
-            invalidatingSizes: Set(fresh.packages.map(\.id)))
+            invalidatingSizes: Set(fresh.packages.map(\.id)), installedInfo: removal.engine.latestInstalledInfo)
           result["retryKeys"] = [fresh.package.id]
           result["requestID"] = requestID
           var command = [
@@ -273,7 +273,7 @@ extension DesktopApp {
           }
           OperationInventory.append(
             to: &result, inventory: removal.engine.inventory, destination: destination,
-            invalidatingSizes: Set(fresh.packages.map(\.id)))
+            invalidatingSizes: Set(fresh.packages.map(\.id)), installedInfo: removal.engine.latestInstalledInfo)
           result["requestID"] = requestID
           let completed = result
           DispatchQueue.main.async {
