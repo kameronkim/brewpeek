@@ -67,7 +67,7 @@ final class UpgradePreparation {
 }
 
 /// Keep recent activity in a byte-bounded buffer without splitting a UTF-8 scalar.
-private struct UpdateLogBuffer {
+struct UpdateLogBuffer {
   private static let byteLimit = 1_000_000
   private var bytes = Data()
   var isEmpty: Bool { bytes.isEmpty }
@@ -109,7 +109,10 @@ final class Upgrade {
   }
   /// File-backed output lets cancellation interrupt silent commands without waiting for pipe EOF.
   /// Only info and upgrade --dry-run are accepted; mutating execution uses command() instead.
-  func readOnly(_ arguments: [String], control: UpgradePreparation, combinedOutput: Bool = false)
+  func readOnly(
+    _ arguments: [String], control: UpgradePreparation, combinedOutput: Bool = false,
+    environmentOverrides: [String: String] = [:]
+  )
     throws -> String
   {
     guard
@@ -117,6 +120,20 @@ final class Upgrade {
     else {
       throw InventoryError(message: "Invalid preparation command.")
     }
+    return try runPreparation(
+      arguments, control: control, combinedOutput: combinedOutput,
+      environmentOverrides: environmentOverrides)
+  }
+  /// Called only with the bundled read-only dependency projection, never with web-provided code.
+  func dependencyProjection(_ script: String, control: UpgradePreparation) throws -> String {
+    try runPreparation(
+      ["ruby", "-e", script], control: control,
+      environmentOverrides: ["HOMEBREW_DEV_CMD_RUN": "1"])
+  }
+  private func runPreparation(
+    _ arguments: [String], control: UpgradePreparation,
+    combinedOutput: Bool = false, environmentOverrides: [String: String] = [:]
+  ) throws -> String {
     try control.check()
     let fm = FileManager.default
     let dir = fm.temporaryDirectory.appendingPathComponent("brewpeek-prepare-" + UUID().uuidString)
@@ -135,7 +152,8 @@ final class Upgrade {
     let task = Process()
     task.executableURL = URL(fileURLWithPath: inventory.brew)
     task.arguments = arguments
-    task.environment = commandEnvironment()
+    task.environment = commandEnvironment().merging(environmentOverrides) { _, override in override
+    }
     task.standardInput = FileHandle.nullDevice
     task.standardOutput = out
     task.standardError = combinedOutput ? out : err
@@ -167,14 +185,18 @@ final class Upgrade {
     }
     return output
   }
-  func command(_ arguments: [String], streaming: ((String) -> Void)? = nil) throws -> (
+  func command(
+    _ arguments: [String], environmentOverrides: [String: String] = [:],
+    streaming: ((String) -> Void)? = nil
+  ) throws -> (
     Int32, String
   ) {
     let task = Process()
     let pipe = Pipe()
     task.executableURL = URL(fileURLWithPath: inventory.brew)
     task.arguments = arguments
-    task.environment = commandEnvironment()
+    task.environment = commandEnvironment().merging(environmentOverrides) { _, override in override
+    }
     task.standardInput = FileHandle.nullDevice
     task.standardOutput = pipe
     task.standardError = pipe
