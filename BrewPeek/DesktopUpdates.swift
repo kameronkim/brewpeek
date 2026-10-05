@@ -64,7 +64,8 @@ extension DesktopApp {
 
   private func cancelUpdatePreparation() {
     if updatePreparing {
-      updateRequestID = nil
+      // Keep ownership until the worker acknowledges cancellation; do not admit another task yet.
+      cancelledPreparationRequestID = updateRequestID
       operationPlan = nil
       preparationControl?.cancel()
     } else if !busy {
@@ -181,7 +182,7 @@ extension DesktopApp {
 
   /// Check the freshly prepared targets on the main queue immediately before mutation.
   func beginPreparedUpdate(_ plan: UpgradePlan, requestID: String) -> Bool {
-    guard updateRequestID == requestID else {
+    guard isCurrentPreparation(requestID) else {
       _ = finishPreparation(requestID)
       return false
     }
@@ -202,12 +203,20 @@ extension DesktopApp {
   }
 
   /// Runs on the main queue, including the final cancellation gate before mutation.
+  func isCurrentPreparation(_ requestID: String) -> Bool {
+    updateRequestID == requestID && cancelledPreparationRequestID != requestID
+  }
+
   func finishPreparation(_ requestID: String) -> Bool {
+    // An obsolete callback must not release the current worker's state or cancellation control.
+    guard updateRequestID == requestID else { return false }
     operationPhase = .idle
     preparationControl = nil
-    guard updateRequestID == requestID else {
+    if cancelledPreparationRequestID == requestID {
+      cancelledPreparationRequestID = nil
+      updateRequestID = nil
       operationPlan = nil
-      sendUpdate(["kind": "cancelled"])
+      sendUpdate(["kind": "cancelled", "requestID": requestID])
       return false
     }
     return true

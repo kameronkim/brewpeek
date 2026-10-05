@@ -38,6 +38,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   var busy: Bool { auxiliaryBusy || operationPhase != .idle }
   var updateInProgress: Bool { operationPhase.isExecuting }
   var updateRequestID: String?
+  var cancelledPreparationRequestID: String?
   var updatePreparing: Bool { operationPhase.isPreparing }
   var preparationControl: UpgradePreparation?
   var operationPlan: PackageOperationPlan?

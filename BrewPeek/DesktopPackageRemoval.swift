@@ -59,7 +59,7 @@ extension DesktopApp {
           }
           let fresh = try removal.prepare(key: plan.package.id, control: control)
           let shouldStart = DispatchQueue.main.sync { () -> Bool in
-            guard self.updateRequestID == requestID else {
+            guard self.isCurrentPreparation(requestID) else {
               _ = self.finishPreparation(requestID)
               return false
             }
@@ -233,7 +233,7 @@ extension DesktopApp {
           }
           let fresh = try removal.prepareCleanup(task, control: control)
           let shouldStart = DispatchQueue.main.sync { () -> Bool in
-            guard self.updateRequestID == requestID else {
+            guard self.isCurrentPreparation(requestID) else {
               _ = self.finishPreparation(requestID)
               return false
             }

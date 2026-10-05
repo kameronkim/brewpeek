@@ -50,7 +50,7 @@ extension DesktopApp {
         try Upgrade.withLock(at: destination) {
           let fresh = try cleanup.prepare(key: plan.key, control: control)
           let shouldStart = DispatchQueue.main.sync { () -> Bool in
-            guard self.updateRequestID == requestID else {
+            guard self.isCurrentPreparation(requestID) else {
               _ = self.finishPreparation(requestID)
               return false
             }
