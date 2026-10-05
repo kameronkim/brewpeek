@@ -66,9 +66,9 @@ final class UpgradePreparation {
   }
 
   private func checkLocked() throws {
-    if cancelled { throw InventoryError(message: "Update check cancelled.") }
+    if cancelled { throw InventoryError(message: "Package check cancelled.") }
     if ProcessInfo.processInfo.systemUptime >= deadline {
-      throw InventoryError(message: "The update check timed out. Check your connection and retry.")
+      throw InventoryError(message: "The package check timed out. Please try again.")
     }
   }
 
