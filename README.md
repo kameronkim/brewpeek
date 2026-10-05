@@ -76,7 +76,7 @@ BrewPeek asks Homebrew to check the changes first. The confirmation table shows 
 
 Homebrew manages the downloads and installation order. The progress panel shows package activity and the number processed; expand **Package details** or **Show activity** for more information. Keep BrewPeek open until the operation finishes.
 
-BrewPeek checks installed versions before reporting the results and refreshes the inventory. Failed or skipped items can be retried. Close a running app before updating it; if administrator permission is required, **View Terminal command** provides the command to run in Terminal. After running it, return to BrewPeek and refresh.
+BrewPeek checks installed versions before reporting the results and refreshes the inventory. Failed or skipped items can be retried. Close a running app before updating it. When Homebrew requires administrator permission during an update or uninstall, BrewPeek asks for your macOS account password in a secure input window. The password is passed directly to sudo and is not saved. Cancel to stop authentication; Homebrew may already have completed earlier steps. If an operation still fails, **View Terminal command** provides a command to run in Terminal. After running it, return to BrewPeek and refresh.
 
 ## Removing packages
 
