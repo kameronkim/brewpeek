@@ -67,11 +67,20 @@ struct PackageRemoval {
       formulae -= excluded.flat_map { |f| [f, *f.installed_runtime_formula_dependencies] }
     end
     removable = Utils::Autoremove.removable_formulae(formulae, casks - [selected_cask])
-    kegs = removable.map(&:any_installed_keg).compact
-    required = InstalledDependents.find_some_installed_dependents(kegs + (selected_formula ? selected_formula.installed_kegs : []), casks: selected_cask ? [selected_cask] : [])
-    required_names = required ? required[0].map(&:name) : []
-    names = removable.reject { |f| required_names.include?(f.name) || protected.include?(f.full_name) }
-      .map(&:full_name).select { |name| scope.include?(name) }.sort
+      .select { |f| scope.include?(f.full_name) && !protected.include?(f.full_name) }
+    # Only this operation's candidates may be excluded from dependent checks.
+    # A candidate kept in one pass may require another candidate in the next pass.
+    loop do
+      kegs = removable.map(&:any_installed_keg).compact
+      required = InstalledDependents.find_some_installed_dependents(
+        kegs + (selected_formula ? selected_formula.installed_kegs : []),
+        casks: selected_cask ? [selected_cask] : [])
+      required_names = required ? required[0].map(&:name) : []
+      remaining = removable.reject { |f| required_names.include?(f.name) }
+      break if remaining.size == removable.size
+      removable = remaining
+    end
+    names = removable.map(&:full_name).sort
     puts JSON.generate({"dependencies" => names, "blocked" => blocked.uniq.sort})
     """#
 
