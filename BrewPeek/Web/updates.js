@@ -482,7 +482,7 @@ window.receiveUpdate = function (event) {
       clearProgressData();
       previousResult = result;
       setUpdateMode('result');
-      if (snapshot) window.setInventory(snapshot);
+      if (snapshot) window.setInventory(snapshot, { preserveView: false });
       paintResult(result);
       restoreInventoryView(view);
       syncActionAvailability();
