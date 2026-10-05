@@ -264,6 +264,11 @@ final class Upgrade {
       streaming?(line)
     }
     task.waitUntilExit()
+    if let directory = authenticationDirectory,
+      FileManager.default.fileExists(atPath: directory.appendingPathComponent("cancelled").path)
+    {
+      output.append("\nAdministrator authentication cancelled. Retry when ready.\n")
+    }
     try? pipe.fileHandleForReading.close()
     return (task.terminationStatus, output.text)
   }
@@ -625,12 +630,15 @@ final class Upgrade {
       } else if result.0 == 0 {
         outcome = "attention"
         message = "Expected installed version could not be verified"
+      } else if result.1.contains("Administrator authentication cancelled.") {
+        outcome = "attention"
+        message = "Authentication cancelled. Retry when ready."
       } else if result.1.localizedCaseInsensitiveContains("sudo")
         || result.1.localizedCaseInsensitiveContains("permission")
         || result.1.localizedCaseInsensitiveContains("password")
       {
         outcome = "attention"
-        message = "May require administrator permission. Review activity and use Terminal."
+        message = "Administrator authentication did not complete. Review activity and retry."
       } else {
         outcome = touched.contains(p.id) ? "failed" : "skipped"
         message =
