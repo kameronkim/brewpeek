@@ -51,11 +51,6 @@ final class Upgrade {
     inventory = Inventory(brew: brew)
     process = BrewProcess(brew: brew)
   }
-  static func validName(_ name: String) -> Bool {
-    name.range(
-      of: #"^[a-zA-Z0-9][a-zA-Z0-9@+_.-]*(/[a-zA-Z0-9][a-zA-Z0-9@+_.-]*){0,2}$"#,
-      options: .regularExpression) != nil
-  }
   func readOnly(
     _ arguments: [String], control: UpgradePreparation, combinedOutput: Bool = false,
     environmentOverrides: [String: String] = [:]
@@ -254,7 +249,7 @@ final class Upgrade {
         parts.contains("->") || (parts.count > 1 && parts[1].first?.isNumber == true)
         ? Array(parts.prefix(1)) : parts
       for name in candidates {
-        guard validName(name) else {
+        guard HomebrewPackageName.isValid(name) else {
           throw InventoryError(message: "Could not read Homebrew's update plan.\n" + text)
         }
         names.insert(name)
@@ -269,7 +264,7 @@ final class Upgrade {
   {
     let installed = try installed(control: control)
     let selected = try keys.map { id -> UpgradePackage in
-      guard var package = installed.first(where: { $0.id == id }), Self.validName(package.fullName)
+      guard var package = installed.first(where: { $0.id == id }), HomebrewPackageName.isValid(package.fullName)
       else {
         throw InventoryError(
           message: "The selected package is no longer installed. Refresh and try again.")
@@ -300,7 +295,7 @@ final class Upgrade {
       package.fullName == name || package.name == name || package.argument == name
     }
     guard !packages.isEmpty,
-      packages.allSatisfy({ Self.validName($0.fullName) && !$0.next.isEmpty }),
+      packages.allSatisfy({ HomebrewPackageName.isValid($0.fullName) && !$0.next.isEmpty }),
       names.allSatisfy({ name in packages.contains { matches($0, name) } }),
       packages.allSatisfy({ package in names.contains { matches(package, $0) } })
     else {
@@ -371,7 +366,7 @@ final class Upgrade {
       {
         let names = line[range.upperBound...].components(separatedBy: ", ").map {
           $0.trimmingCharacters(in: .whitespacesAndNewlines)
-        }.filter(Self.validName)
+        }.filter(HomebrewPackageName.isValid)
         for name in names {
           if !items.contains(where: { $0.name == name || $0.fullName == name }) {
             let old = before.first(where: {

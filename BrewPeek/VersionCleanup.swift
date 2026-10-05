@@ -84,7 +84,7 @@ struct VersionCleanup {
   func prepare(key: String, control: UpgradePreparation = UpgradePreparation()) throws
     -> VersionCleanupPlan
   {
-    guard key.hasPrefix("formula:"), Upgrade.validName(String(key.dropFirst(8))) else {
+    guard key.hasPrefix("formula:"), HomebrewPackageName.isValid(String(key.dropFirst(8))) else {
       throw InventoryError(message: "Select an installed Formula to review versions.")
     }
     let text = try engine.dependencyProjection(

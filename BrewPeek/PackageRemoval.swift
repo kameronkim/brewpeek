@@ -107,7 +107,7 @@ struct PackageRemoval {
         message: "This Formula cannot be uninstalled while it is pinned or required by: "
           + blocked.joined(separator: ", "))
     }
-    guard let names = data["dependencies"] as? [String], names.allSatisfy(Upgrade.validName),
+    guard let names = data["dependencies"] as? [String], names.allSatisfy(HomebrewPackageName.isValid),
       Set(names).count == names.count
     else {
       throw InventoryError(message: "Homebrew could not verify removable dependencies.")
@@ -119,7 +119,7 @@ struct PackageRemoval {
     -> PackageRemovalPlan
   {
     let parts = key.split(separator: ":", maxSplits: 1).map(String.init)
-    guard parts.count == 2, ["formula", "cask"].contains(parts[0]), Upgrade.validName(parts[1])
+    guard parts.count == 2, ["formula", "cask"].contains(parts[0]), HomebrewPackageName.isValid(parts[1])
     else {
       throw InventoryError(message: "Select an installed package to uninstall.")
     }

@@ -221,9 +221,7 @@ final class Inventory {
     }
     func validIdentifier(_ value: Any?) -> Bool {
       guard let text = value as? String, !text.isEmpty else { return false }
-      return text.range(
-        of: #"^[a-zA-Z0-9][a-zA-Z0-9@+_.-]*(/[a-zA-Z0-9][a-zA-Z0-9@+_.-]*){0,2}$"#,
-        options: .regularExpression) != nil
+      return HomebrewPackageName.isValid(text)
     }
     guard let formulae = info["formulae"] as? [Record], let casks = info["casks"] as? [Record]
     else { throw invalid() }

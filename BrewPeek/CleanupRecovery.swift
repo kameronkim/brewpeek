@@ -48,7 +48,7 @@ enum RemovalTaskStore {
     guard task.schemaVersion == 1, UUID(uuidString: task.id) != nil,
       ["formula", "cask"].contains(task.root.type),
       task.dependencies.allSatisfy({ $0.type == "formula" }),
-      packages.allSatisfy({ Upgrade.validName($0.fullName) && !$0.current.isEmpty }),
+      packages.allSatisfy({ HomebrewPackageName.isValid($0.fullName) && !$0.current.isEmpty }),
       Set(packages.map { $0.package.id }).count == packages.count
     else { throw InventoryError(message: "The saved cleanup task has an invalid format.") }
     return task
