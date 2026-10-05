@@ -29,7 +29,6 @@ struct UpgradePlan {
   let token = UUID().uuidString
   let selected: [UpgradePackage]
   let packages: [UpgradePackage]
-  let output: String
   let excluded: [String]
   var fingerprint: [String] {
     packages.map { $0.id + "|" + $0.current.joined(separator: ",") + "|" + $0.next }.sorted()
@@ -37,7 +36,7 @@ struct UpgradePlan {
   var record: Record {
     [
       "token": token, "selectedCount": selected.count, "packages": packages.map(\.record),
-      "details": output, "excluded": excluded,
+      "excluded": excluded,
     ]
   }
 }
@@ -322,7 +321,7 @@ final class Upgrade {
           + output)
     }
     return UpgradePlan(
-      selected: actionable, packages: Self.explainRelationships(packages), output: output,
+      selected: actionable, packages: Self.explainRelationships(packages),
       excluded: selected.filter { p in !actionable.contains(where: { $0.id == p.id }) }.map(\.name))
   }
 
