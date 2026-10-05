@@ -6,8 +6,7 @@ extension DesktopApp {
     busy = true
     updatePreparing = true
     updateRequestID = requestID
-    updatePlan = nil
-    removalPlan = nil
+    operationPlan = nil
     let control = UpgradePreparation()
     preparationControl = control
     let destination = output
@@ -25,7 +24,7 @@ extension DesktopApp {
         }
         DispatchQueue.main.async {
           guard self.finishPreparation(requestID) else { return }
-          self.removalPlan = plan
+          self.operationPlan = .uninstall(plan)
           self.sendUpdate(["kind": "plan", "plan": plan.record, "requestID": requestID])
         }
       } catch {
@@ -44,7 +43,7 @@ extension DesktopApp {
     updateInProgress = true
     updatePreparing = true
     updateRequestID = requestID
-    removalPlan = nil
+    operationPlan = nil
     let control = UpgradePreparation()
     preparationControl = control
     let destination = output
@@ -69,7 +68,7 @@ extension DesktopApp {
             }
             guard fresh.fingerprint == plan.fingerprint else {
               guard self.finishPreparation(requestID) else { return false }
-              self.removalPlan = fresh
+              self.operationPlan = .uninstall(fresh)
               self.sendUpdate([
                 "kind": "plan", "plan": fresh.record, "changed": true, "requestID": requestID,
               ])
@@ -188,9 +187,7 @@ extension DesktopApp {
     busy = true
     updatePreparing = true
     updateRequestID = requestID
-    cleanupPlan = nil
-    removalPlan = nil
-    updatePlan = nil
+    operationPlan = nil
     let control = UpgradePreparation()
     preparationControl = control
     let destination = output
@@ -207,7 +204,7 @@ extension DesktopApp {
         }
         DispatchQueue.main.async {
           guard self.finishPreparation(requestID) else { return }
-          self.cleanupPlan = plan
+          self.operationPlan = .cleanup(plan)
           self.sendUpdate(["kind": "plan", "plan": plan.record, "requestID": requestID])
         }
       } catch {
@@ -226,7 +223,7 @@ extension DesktopApp {
     updateInProgress = true
     updatePreparing = true
     updateRequestID = requestID
-    cleanupPlan = nil
+    operationPlan = nil
     let control = UpgradePreparation()
     preparationControl = control
     let destination = output
@@ -250,7 +247,7 @@ extension DesktopApp {
             }
             guard fresh.fingerprint == plan.fingerprint else {
               guard self.finishPreparation(requestID) else { return false }
-              self.cleanupPlan = fresh
+              self.operationPlan = .cleanup(fresh)
               self.sendUpdate([
                 "kind": "plan", "plan": fresh.record, "changed": true, "requestID": requestID,
               ])

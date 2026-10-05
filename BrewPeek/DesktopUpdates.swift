@@ -25,7 +25,7 @@ extension DesktopApp {
       prepareVersionCleanup(
         key: keys[0], requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "startVersions":
-      guard let token = request["token"] as? String, let plan = versionCleanupPlan,
+      guard let token = request["token"] as? String, case let .versions(plan)? = operationPlan,
         token == plan.token, let selected = request["versions"] as? [String]
       else { return }
       startVersionCleanup(
@@ -34,7 +34,7 @@ extension DesktopApp {
       guard let id = request["recoveryID"] as? String else { return }
       prepareSavedCleanup(id: id, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "startCleanup":
-      guard let token = request["token"] as? String, let plan = cleanupPlan, token == plan.token
+      guard let token = request["token"] as? String, case let .cleanup(plan)? = operationPlan, token == plan.token
       else { return }
       startSavedCleanup(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "discardCleanup":
@@ -46,7 +46,7 @@ extension DesktopApp {
         key: keys[0], requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "startUninstall":
       guard let token = request["token"] as? String,
-        let plan = removalPlan, token == plan.token
+        case let .uninstall(plan)? = operationPlan, token == plan.token
       else { return }
       startPackageRemoval(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "prepare":
@@ -54,7 +54,7 @@ extension DesktopApp {
       prepareUpdate(keys: keys, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "start":
       guard let token = request["token"] as? String,
-        let plan = updatePlan, token == plan.token
+        case let .update(plan)? = operationPlan, token == plan.token
       else { return }
       startUpdate(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
     default:
@@ -65,17 +65,11 @@ extension DesktopApp {
   private func cancelUpdatePreparation() {
     if updatePreparing {
       updateRequestID = nil
-      updatePlan = nil
-      removalPlan = nil
-      cleanupPlan = nil
-      versionCleanupPlan = nil
+      operationPlan = nil
       preparationControl?.cancel()
     } else if !busy {
       updateRequestID = nil
-      updatePlan = nil
-      removalPlan = nil
-      cleanupPlan = nil
-      versionCleanupPlan = nil
+      operationPlan = nil
       sendUpdate(["kind": "cancelled"])
     }
   }
@@ -85,10 +79,7 @@ extension DesktopApp {
     busy = true
     updatePreparing = true
     updateRequestID = requestID
-    updatePlan = nil
-    removalPlan = nil
-    cleanupPlan = nil
-    versionCleanupPlan = nil
+    operationPlan = nil
     sendUpdate(["kind": "checking", "requestID": requestID])
     let destination = output
     let control = UpgradePreparation()
@@ -101,7 +92,7 @@ extension DesktopApp {
         }
         DispatchQueue.main.async {
           guard self.finishPreparation(requestID) else { return }
-          self.updatePlan = plan
+          self.operationPlan = .update(plan)
           self.sendUpdate(["kind": "plan", "plan": plan.record, "requestID": requestID])
         }
       } catch {
@@ -119,7 +110,7 @@ extension DesktopApp {
     updateRequestID = requestID
     let active = runningApps(for: plan.packages)
     guard active.isEmpty else {
-      updatePlan = nil
+      operationPlan = nil
       sendUpdate([
         "kind": "error", "runningApps": Array(Set(active)).sorted(),
         "message": "Close these apps before updating, then retry: "
@@ -130,7 +121,7 @@ extension DesktopApp {
     busy = true
     updateInProgress = true
     updatePreparing = true
-    updatePlan = nil
+    operationPlan = nil
     sendUpdate([
       "kind": "checking", "message": "Rechecking the confirmed plan…", "requestID": requestID,
     ])
@@ -145,7 +136,7 @@ extension DesktopApp {
           guard fresh.fingerprint == plan.fingerprint else {
             DispatchQueue.main.async {
               guard self.finishPreparation(requestID) else { return }
-              self.updatePlan = fresh
+              self.operationPlan = .update(fresh)
               self.sendUpdate([
                 "kind": "plan", "plan": fresh.record, "changed": true, "requestID": requestID,
               ])
@@ -222,10 +213,7 @@ extension DesktopApp {
     updateInProgress = false
     preparationControl = nil
     guard updateRequestID == requestID else {
-      updatePlan = nil
-      removalPlan = nil
-      cleanupPlan = nil
-      versionCleanupPlan = nil
+      operationPlan = nil
       sendUpdate(["kind": "cancelled"])
       return false
     }
@@ -247,8 +235,7 @@ extension DesktopApp {
   }
   private func permitClose() -> Bool {
     guard
-      updateInProgress || updatePlan != nil || removalPlan != nil || cleanupPlan != nil
-        || versionCleanupPlan != nil
+      updateInProgress || hasOperationPlan
     else {
       return true
     }
