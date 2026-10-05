@@ -309,6 +309,7 @@ final class Upgrade {
     var sentStates = states
     var packagesChanged = false
     var touched = Set<String>()
+    var activityMatcher = PackageActivityMatcher()
     var bufferedLines = UpdateLogBuffer()
     var lastEvent = Date.distantPast
     event(["kind": "progress", "packages": items.map(\.record), "states": states, "processed": 0])
@@ -384,11 +385,7 @@ final class Upgrade {
       }
       // Output is activity, not proof of success. Percentages are intentionally not inferred.
       if let phase {
-        for p in items
-        where line.range(
-          of: "(?<![A-Za-z0-9@+_.-])" + NSRegularExpression.escapedPattern(for: p.name)
-            + "(?![A-Za-z0-9@+_.-])", options: .regularExpression) != nil
-        {
+        for p in items where activityMatcher.matches(p.name, in: line) {
           states[p.id] = phase
           if phase != "Downloading…" { touched.insert(p.id) }
         }

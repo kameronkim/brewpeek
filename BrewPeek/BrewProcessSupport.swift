@@ -40,3 +40,22 @@ struct UpdateLogBuffer {
   }
   mutating func removeAll() { bytes.removeAll(keepingCapacity: true) }
 }
+
+/// Compile each package-name boundary pattern once per operation, including newly discovered names.
+struct PackageActivityMatcher {
+  private var patterns: [String: NSRegularExpression] = [:]
+
+  mutating func matches(_ name: String, in line: String) -> Bool {
+    let pattern: NSRegularExpression
+    if let cached = patterns[name] {
+      pattern = cached
+    } else {
+      let expression = "(?<![A-Za-z0-9@+_.-])" + NSRegularExpression.escapedPattern(for: name)
+        + "(?![A-Za-z0-9@+_.-])"
+      guard let compiled = try? NSRegularExpression(pattern: expression) else { return false }
+      patterns[name] = compiled
+      pattern = compiled
+    }
+    return pattern.firstMatch(in: line, range: NSRange(line.startIndex..<line.endIndex, in: line)) != nil
+  }
+}
