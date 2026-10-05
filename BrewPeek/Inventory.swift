@@ -241,6 +241,7 @@ final class Inventory {
       formulas.append([
         "id": id,
         "name": name, "displayName": name, "version": versions.joined(separator: ", "),
+        "installedVersions": versions,
         "availableVersion": nullable(updates.formulae[formula["full_name"] as? String ?? name]),
         "deprecated": formula["deprecated"] as? Bool ?? false,
         "type": "formula", "description": formula["desc"] ?? null, "tap": formula["tap"] ?? null,

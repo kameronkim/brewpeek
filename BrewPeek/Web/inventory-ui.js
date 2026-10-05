@@ -9,6 +9,7 @@ function captureInventoryFocus(element = document.activeElement) {
     key: row?.dataset.key,
     update: element.hasAttribute('data-update'),
     uninstall: element.hasAttribute('data-uninstall'),
+    versions: element.hasAttribute('data-version-cleanup'),
     sort: element.dataset.sort,
     section: element.closest('.section')?.id
   };
@@ -20,7 +21,9 @@ function restoreInventoryFocus(focus) {
     const row = [...document.querySelectorAll('.package-row')].find(
       (r) => r.dataset.key === focus.key
     );
-    element = focus.uninstall
+    element = focus.versions
+      ? row?.nextElementSibling?.querySelector('[data-version-cleanup]:not(:disabled)')
+      : focus.uninstall
       ? row?.nextElementSibling?.querySelector('[data-uninstall]:not(:disabled)')
       : row?.querySelector(focus.update ? '[data-update]:not(:disabled)' : '.package-button');
   }

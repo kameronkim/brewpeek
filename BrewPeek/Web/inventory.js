@@ -120,9 +120,11 @@ function detail(p) {
     );
   }
   const actions = p.type === 'cask' || p.direct === true
-    ? `<div class="detail-actions"><button class="subtle-btn uninstall-btn" data-uninstall="${esc(key(p))}">Uninstall</button></div>`
+    ? `<button class="subtle-btn uninstall-btn" data-uninstall="${esc(key(p))}">Uninstall</button>`
     : '';
-  return `<div class="details-grid"><dl style="display:contents">${fields}</dl>${actions}</div>`;
+  const versions = p.type === 'formula' && p.installedVersions?.length > 1
+    ? `<button class="subtle-btn" data-version-cleanup="${esc(key(p))}">Manage versions</button>` : '';
+  return `<div class="details-grid"><dl style="display:contents">${fields}</dl>${versions || actions ? `<div class="detail-actions">${versions}${actions}</div>` : ''}</div>`;
 }
 function row(p) {
   const id = 'detail-' + encodeURIComponent(key(p)),

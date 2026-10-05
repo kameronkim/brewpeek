@@ -20,6 +20,16 @@ extension DesktopApp {
     guard !busy else { return }
 
     switch action {
+    case "prepareVersions":
+      guard let keys = request["keys"] as? [String], keys.count == 1 else { return }
+      prepareVersionCleanup(
+        key: keys[0], requestID: request["requestID"] as? String ?? UUID().uuidString)
+    case "startVersions":
+      guard let token = request["token"] as? String, let plan = versionCleanupPlan,
+        token == plan.token, let selected = request["versions"] as? [String]
+      else { return }
+      startVersionCleanup(
+        plan, selected: selected, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "prepareCleanup":
       guard let id = request["recoveryID"] as? String else { return }
       prepareSavedCleanup(id: id, requestID: request["requestID"] as? String ?? UUID().uuidString)
@@ -58,12 +68,14 @@ extension DesktopApp {
       updatePlan = nil
       removalPlan = nil
       cleanupPlan = nil
+      versionCleanupPlan = nil
       preparationControl?.cancel()
     } else if !busy {
       updateRequestID = nil
       updatePlan = nil
       removalPlan = nil
       cleanupPlan = nil
+      versionCleanupPlan = nil
       sendUpdate(["kind": "cancelled"])
     }
   }
@@ -76,6 +88,7 @@ extension DesktopApp {
     updatePlan = nil
     removalPlan = nil
     cleanupPlan = nil
+    versionCleanupPlan = nil
     sendUpdate(["kind": "checking", "requestID": requestID])
     let destination = output
     let control = UpgradePreparation()
@@ -203,6 +216,7 @@ extension DesktopApp {
       updatePlan = nil
       removalPlan = nil
       cleanupPlan = nil
+      versionCleanupPlan = nil
       sendUpdate(["kind": "cancelled"])
       return false
     }
@@ -223,7 +237,10 @@ extension DesktopApp {
     return Array(Set(names)).sorted()
   }
   private func permitClose() -> Bool {
-    guard updateInProgress || updatePlan != nil || removalPlan != nil || cleanupPlan != nil else {
+    guard
+      updateInProgress || updatePlan != nil || removalPlan != nil || cleanupPlan != nil
+        || versionCleanupPlan != nil
+    else {
       return true
     }
     sendUpdate([
