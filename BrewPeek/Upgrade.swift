@@ -410,8 +410,9 @@ final class Upgrade {
           var r = p.record
           r["outcome"] = "attention"
           r["message"] = "Could not verify installed version"
+          r["actualVersion"] = "Unknown"
           return r
-        }, "details": details.text, "verified": false,
+        }, "details": details.text, "verified": false, "exitCode": result.0,
       ]
     }
     items = items.map { p in
