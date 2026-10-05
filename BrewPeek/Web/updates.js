@@ -132,7 +132,7 @@ function setConfirmState(mode) {
   document.querySelector('.confirm-heading .eyebrow').textContent = operationKind.startsWith('cleanup') ? 'DEPENDENCY CLEANUP' : operationKind === 'uninstall' ? 'PACKAGE UNINSTALL' : 'PACKAGE UPDATE';
   $('start').textContent = operationKind === 'uninstall' ? 'Uninstall' : 'Update';
   document.querySelector('.confirm-bottom > p').textContent = operationKind === 'uninstall' ? 'Settings and support files may remain.' : 'Homebrew may also update related packages.';
-  document.querySelector('.confirm-scroll').setAttribute('aria-label', operationKind === 'uninstall' ? 'Packages to uninstall' : 'Packages to update');
+  document.querySelector('.confirm-scroll').setAttribute('aria-label', operationKind.startsWith('cleanup') ? 'Remaining dependencies' : operationKind === 'uninstall' ? 'Packages to uninstall' : 'Packages to update');
   $('confirm').dataset.state = mode;
   document.querySelector('.confirm-scroll').hidden = mode !== 'confirming';
   document.querySelector('.confirm-bottom > p').hidden = mode !== 'confirming';
@@ -180,7 +180,7 @@ function showPlan(plan, changed) {
   document.querySelector('.confirm-table th:nth-child(3)').textContent = cleanup ? 'Status' : 'New';
   if (cleanup) {
     $('confirm-title').textContent = plan.packages.length ? 'Remove remaining dependencies?' : 'No dependencies to remove';
-    $('confirm-copy').textContent = (changed ? 'The plan changed. Review it before continuing. ' : '') + `${plan.rootName} is already uninstalled. ${plan.packages.length} unused dependencies are ready to remove.`;
+    $('confirm-copy').textContent = (changed ? 'The plan changed. Review it before continuing. ' : '') + `${plan.rootName} is already uninstalled. ${plan.packages.length} unused ${plan.packages.length === 1 ? 'dependency is' : 'dependencies are'} ready to remove.`;
     $('confirm-list').innerHTML = [...plan.packages, ...(plan.kept || [])].map(p => `<tr><td>${esc(p.name)}<small class="dependency-note">${esc(p.message || p.relationship || p.reason)}</small></td><td>${esc(p.version)}</td><td>${esc(p.status)}</td></tr>`).join('');
     $('start').textContent = plan.packages.length ? 'Remove dependencies' : 'Finish review';
     document.querySelector('.confirm-bottom > p').textContent = 'Shared, directly installed, pinned, and changed installations are kept.';
