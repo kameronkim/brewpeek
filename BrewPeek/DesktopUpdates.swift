@@ -243,7 +243,7 @@ extension DesktopApp {
         packages.contains(where: { package in
           package.type == "cask"
             && package.apps.contains { path in
-              URL(fileURLWithPath: path).lastPathComponent == url.lastPathComponent
+              CaskApps.matches(path, running: url)
             }
         })
       else { return nil }

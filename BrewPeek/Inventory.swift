@@ -269,11 +269,8 @@ final class Inventory {
           force: invalidatingSizes.contains(id)))
       var apps: [Record] = []
       var expected = false
-      for artifact in cask["artifacts"] as? [Record] ?? [] {
-        guard let appNames = artifact["app"] as? [Any], let appName = appNames.first as? String
-        else { continue }
+      for path in CaskApps.paths(cask, caskroom: caskroom) {
         expected = true
-        let path = artifact["target"] as? String ?? "/Applications/" + appName
         if let data = try? Data(contentsOf: URL(fileURLWithPath: path + "/Contents/Info.plist")),
           let plist = (try? PropertyListSerialization.propertyList(from: data, format: nil))
             as? Record

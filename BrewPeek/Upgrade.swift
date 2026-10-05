@@ -86,6 +86,7 @@ struct UpdateLogBuffer {
 /// All commands run off the main thread. Arguments come from Homebrew metadata, never shell text.
 final class Upgrade {
   let inventory: Inventory
+  private var caskroom: String?
   init(brew: String) { inventory = Inventory(brew: brew) }
   static func validName(_ name: String) -> Bool {
     name.range(
@@ -108,7 +109,7 @@ final class Upgrade {
     return env
   }
   /// File-backed output lets cancellation interrupt silent commands without waiting for pipe EOF.
-  /// Only info and upgrade --dry-run are accepted; mutating execution uses command() instead.
+  /// Only metadata queries and upgrade --dry-run are accepted; mutations use command() instead.
   func readOnly(
     _ arguments: [String], control: UpgradePreparation, combinedOutput: Bool = false,
     environmentOverrides: [String: String] = [:]
@@ -116,7 +117,8 @@ final class Upgrade {
     throws -> String
   {
     guard
-      arguments.first == "info" || (arguments.first == "upgrade" && arguments.contains("--dry-run"))
+      arguments.first == "info" || arguments == ["--caskroom"]
+        || (arguments.first == "upgrade" && arguments.contains("--dry-run"))
     else {
       throw InventoryError(message: "Invalid preparation command.")
     }
@@ -281,7 +283,7 @@ final class Upgrade {
     }
     return object
   }
-  static func packages(_ info: Record) -> [UpgradePackage] {
+  static func packages(_ info: Record, caskroom: String? = nil) -> [UpgradePackage] {
     var result: [UpgradePackage] = []
     for f in info["formulae"] as? [Record] ?? [] {
       guard let name = f["name"] as? String else { continue }
@@ -309,9 +311,7 @@ final class Upgrade {
       guard let name = c["token"] as? String else { continue }
       let full = c["full_token"] as? String ?? name
       let versions = c["installed"] as? [String] ?? (c["installed"] as? String).map { [$0] } ?? []
-      let apps = (c["artifacts"] as? [Record] ?? []).compactMap {
-        ($0["app"] as? [Any])?.first as? String
-      }
+      let apps = CaskApps.paths(c, caskroom: caskroom)
       let dependencies = c["depends_on"] as? Record ?? [:]
       let dependencyIDs = ["formula", "cask"].flatMap { type in
         (dependencies[type] as? [String] ?? []).map { relationshipID($0, type: type) }
@@ -362,8 +362,22 @@ final class Upgrade {
       return package
     }
   }
+  private func resolvedPackages(_ info: Record, control: UpgradePreparation? = nil) throws
+    -> [UpgradePackage]
+  {
+    if caskroom == nil, (info["casks"] as? [Record] ?? []).contains(where: CaskApps.needsAppDirectory) {
+      let path = try control.map { try readOnly(["--caskroom"], control: $0) }
+        ?? inventory.run(inventory.brew, ["--caskroom"])
+      let directory = path.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard directory.hasPrefix("/") else {
+        throw InventoryError(message: "Could not resolve Homebrew's Caskroom path.")
+      }
+      caskroom = directory
+    }
+    return Self.packages(info, caskroom: caskroom)
+  }
   func installed(control: UpgradePreparation? = nil) throws -> [UpgradePackage] {
-    Self.packages(try json(["info", "--json=v2", "--installed"], control: control))
+    try resolvedPackages(json(["info", "--json=v2", "--installed"], control: control), control: control)
   }
   /// Read only recognized plan blocks, then resolve every name through Homebrew JSON.
   static func plannedNames(_ text: String) throws -> [String] {
@@ -454,7 +468,7 @@ final class Upgrade {
       return matches.isEmpty ? [name] : matches.map(\.argument)
     }
     let metadata = try json(["info", "--json=v2"] + arguments, control: control)
-    var packages = Self.packages(metadata)
+    var packages = try resolvedPackages(metadata, control: control)
     guard !packages.isEmpty,
       packages.allSatisfy({ Self.validName($0.fullName) && !$0.next.isEmpty })
     else {
