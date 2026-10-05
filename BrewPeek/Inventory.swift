@@ -6,6 +6,24 @@ struct InventoryError: LocalizedError {
   let message: String
   var errorDescription: String? { message }
 }
+struct InstalledFormulaInfo {
+  let raw: Record
+  let name: String
+  let fullName: String
+  let receipts: [Record]
+  let versions: [String]
+}
+struct InstalledCaskInfo {
+  let raw: Record
+  let name: String
+  let fullName: String
+  let versions: [String]
+}
+struct InstalledPackageInfo {
+  let formulae: [InstalledFormulaInfo]
+  let casks: [InstalledCaskInfo]
+}
+
 final class Inventory {
   let brew: String
   let null = NSNull()
@@ -196,7 +214,8 @@ final class Inventory {
     }
   }
   /// Validate installed metadata before it can be cached or used to verify a mutation.
-  static func validateInstalledInfo(_ info: Record) throws {
+  @discardableResult
+  static func validateInstalledInfo(_ info: Record) throws -> InstalledPackageInfo {
     func invalid() -> InventoryError {
       InventoryError(message: "Homebrew returned incomplete installed package information.")
     }
@@ -209,7 +228,7 @@ final class Inventory {
     guard let formulae = info["formulae"] as? [Record], let casks = info["casks"] as? [Record]
     else { throw invalid() }
     var identities = Set<String>()
-    for formula in formulae {
+    let validatedFormulae = try formulae.map { formula -> InstalledFormulaInfo in
       guard validIdentifier(formula["name"]),
         let name = formula["name"] as? String,
         validIdentifier(formula["full_name"] ?? name),
@@ -217,8 +236,11 @@ final class Inventory {
         receipts.allSatisfy({ ($0["version"] as? String)?.isEmpty == false }),
         identities.insert("formula:" + (formula["full_name"] as? String ?? name)).inserted
       else { throw invalid() }
+      return InstalledFormulaInfo(
+        raw: formula, name: name, fullName: formula["full_name"] as? String ?? name,
+        receipts: receipts, versions: receipts.compactMap { $0["version"] as? String })
     }
-    for cask in casks {
+    let validatedCasks = try casks.map { cask -> InstalledCaskInfo in
       guard validIdentifier(cask["token"]), let token = cask["token"] as? String,
         validIdentifier(cask["full_token"] ?? token),
         identities.insert("cask:" + (cask["full_token"] as? String ?? token)).inserted
@@ -226,7 +248,10 @@ final class Inventory {
       let versions = cask["installed"] as? [String]
         ?? (cask["installed"] as? String).map { [$0] }
       guard let versions, versions.allSatisfy({ !$0.isEmpty }) else { throw invalid() }
+      return InstalledCaskInfo(
+        raw: cask, name: token, fullName: cask["full_token"] as? String ?? token, versions: versions)
     }
+    return InstalledPackageInfo(formulae: validatedFormulae, casks: validatedCasks)
   }
 
   func collect(
@@ -246,37 +271,29 @@ final class Inventory {
       }
       raw = value
     }
-    try Self.validateInstalledInfo(raw)
-    let formulae = raw["formulae"] as! [Record]
-    let casks = raw["casks"] as! [Record]
+    let installed = try Self.validateInstalledInfo(raw)
+    let formulae = installed.formulae
+    let casks = installed.casks
     let leaves = Set(lines(try run(brew, ["leaves"])))
     let taps = lines(try run(brew, ["tap"]))
     let prefix = try run(brew, ["--prefix"])
     let cellar = try run(brew, ["--cellar"])
     let caskroom = try run(brew, ["--caskroom"])
     var reverse: [String: Set<String>] = [:]
-    for formula in formulae {
-      guard let name = formula["name"] as? String else {
-        throw InventoryError(message: NSLocalizedString("Formula name is missing.", comment: ""))
-      }
-      for dep in dependencies(formula) {
+    for item in formulae {
+      let name = item.name
+      for dep in dependencies(item.raw) {
         reverse[String(dep.split(separator: "/").last ?? Substring(dep)), default: []].insert(name)
       }
     }
     var sizeRequests: [InventorySizeRequest] = []
     var formulas: [Record] = []
-    for formula in formulae {
-      guard let name = formula["name"] as? String, let receipts = formula["installed"] as? [Record]
-      else {
-        throw InventoryError(
-          message: NSLocalizedString("Formula installation records are missing.", comment: ""))
-      }
-      let versions = receipts.compactMap { $0["version"] as? String }
-      guard versions.count == receipts.count else {
-        throw InventoryError(
-          message: NSLocalizedString("Installed version is missing: ", comment: "") + name)
-      }
-      let id = "formula:" + (formula["full_name"] as? String ?? name)
+    for item in formulae {
+      let formula = item.raw
+      let name = item.name
+      let receipts = item.receipts
+      let versions = item.versions
+      let id = "formula:" + item.fullName
       sizeRequests.append(
         InventorySizeRequest(
           path: cellar + "/" + name, metadata: ["installed": receipts],
@@ -297,11 +314,10 @@ final class Inventory {
       ])
     }
     var applications: [Record] = []
-    for cask in casks {
-      guard let name = cask["token"] as? String else {
-        throw InventoryError(message: NSLocalizedString("Cask token is missing.", comment: ""))
-      }
-      let id = "cask:" + (cask["full_token"] as? String ?? name)
+    for item in casks {
+      let cask = item.raw
+      let name = item.name
+      let id = "cask:" + item.fullName
       let installation: Record = [
         "installed": cask["installed"] ?? null,
         "installedTime": cask["installed_time"] ?? null,
@@ -340,9 +356,7 @@ final class Inventory {
           ])
         }
       }
-      let version: Any =
-        (cask["installed"] as? [String]).map { $0.joined(separator: ", ") } ?? cask["installed"]
-        ?? null
+      let version = item.versions.joined(separator: ", ")
       let names = cask["name"] as? [String] ?? [name]
       applications.append([
         "id": id,
