@@ -145,6 +145,8 @@ extension DesktopApp {
     guard !recoveryChecked, !busy, inventoryRefreshState == "idle" else { return }
     recoveryChecked = true
     auxiliaryBusy = true
+    let control = UpgradePreparation()
+    preparationControl = control
     sendUpdate(["kind": "recoveryChecking"])
     let destination = output
     DispatchQueue.global(qos: .userInitiated).async {
@@ -152,7 +154,7 @@ extension DesktopApp {
         try Upgrade.withLock(at: destination) {
           guard let task = try RemovalTaskStore.load(at: destination) else { return nil }
           let removal = PackageRemoval(brew: try Inventory.locateBrew())
-          var result = try removal.recoveryResult(task)
+          var result = try removal.recoveryResult(task, control: control)
           if !(try RemovalTaskStore.finish(task, result: result, at: destination)) {
             result.removeValue(forKey: "recoveryID")
           }
@@ -160,6 +162,8 @@ extension DesktopApp {
         }
       }
       DispatchQueue.main.async {
+        guard self.preparationControl === control else { return }
+        self.preparationControl = nil
         self.auxiliaryBusy = false
         switch result {
         case .success(let record): self.sendUpdate(record ?? ["kind": "recoveryEmpty"])
