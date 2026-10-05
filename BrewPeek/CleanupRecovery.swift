@@ -65,6 +65,27 @@ enum RemovalTaskStore {
     }
     try FileManager.default.removeItem(at: url(for: inventory))
   }
+  /// Persistence errors must not replace a completed Homebrew operation's results.
+  static func finishPreservingResult(
+    _ task: RemovalTask, result: inout Record, at inventory: URL, cleanup: Bool = false
+  ) {
+    do {
+      let pending = try finish(task, result: result, at: inventory)
+      result.removeValue(forKey: "recoveryID")
+      result.removeValue(forKey: "pendingCleanup")
+      if pending {
+        result["recoveryID"] = task.id
+        result["pendingCleanup"] = (cleanup && result["verified"] as? Bool != true)
+          || (result["packages"] as? [Record])?.first?["actualVersion"] as? String == "Not installed"
+      }
+    } catch {
+      // Do not promise that a stale or unreadable task can be retried from this result.
+      result.removeValue(forKey: "recoveryID")
+      result.removeValue(forKey: "pendingCleanup")
+      result["recoveryError"] = "Could not update the saved cleanup task. Refresh to check recovery status.\n"
+        + error.localizedDescription
+    }
+  }
   static func finish(_ task: RemovalTask, result: Record, at inventory: URL) throws -> Bool {
     guard result["verified"] as? Bool == true, let rows = result["packages"] as? [Record] else {
       return true

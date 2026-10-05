@@ -94,13 +94,7 @@ extension DesktopApp {
             event["requestID"] = requestID
             DispatchQueue.main.async { self.sendUpdate(event) }
           }
-          let pending = try RemovalTaskStore.finish(task, result: result, at: destination)
-          if pending {
-            result["recoveryID"] = task.id
-            result["pendingCleanup"] =
-              (result["packages"] as? [Record])?.first?["actualVersion"] as? String
-              == "Not installed"
-          }
+          RemovalTaskStore.finishPreservingResult(task, result: &result, at: destination)
           OperationInventory.append(
             to: &result, inventory: removal.engine.inventory, destination: destination,
             invalidatingSizes: Set(fresh.packages.map(\.id)), installedInfo: removal.engine.latestInstalledInfo)
@@ -155,9 +149,7 @@ extension DesktopApp {
           guard let task = try RemovalTaskStore.load(at: destination) else { return nil }
           let removal = PackageRemoval(brew: try Inventory.locateBrew())
           var result = try removal.recoveryResult(task, control: control)
-          if !(try RemovalTaskStore.finish(task, result: result, at: destination)) {
-            result.removeValue(forKey: "recoveryID")
-          }
+          RemovalTaskStore.finishPreservingResult(task, result: &result, at: destination)
           return result
         }
       }
@@ -253,12 +245,8 @@ extension DesktopApp {
             event["requestID"] = requestID
             DispatchQueue.main.async { self.sendUpdate(event) }
           }
-          let pending = try RemovalTaskStore.finish(task, result: result, at: destination)
-          if pending {
-            result["recoveryID"] = task.id
-            result["pendingCleanup"] = result["verified"] as? Bool != true
-              || (result["packages"] as? [Record])?.first?["actualVersion"] as? String == "Not installed"
-          }
+          RemovalTaskStore.finishPreservingResult(
+            task, result: &result, at: destination, cleanup: true)
           OperationInventory.append(
             to: &result, inventory: removal.engine.inventory, destination: destination,
             invalidatingSizes: Set(fresh.packages.map(\.id)), installedInfo: removal.engine.latestInstalledInfo)
