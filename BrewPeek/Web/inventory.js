@@ -248,7 +248,10 @@ $('packages').addEventListener('click', (event) => {
   tr.querySelector('.chevron').textContent = open ? '−' : '+';
   const target = tr.nextElementSibling;
   target.hidden = !open;
-  if (open) target.firstElementChild.innerHTML = detail(p);
+  if (open) {
+    target.firstElementChild.innerHTML = detail(p);
+    syncActionAvailability();
+  }
 });
 window.setInventory = function (data) {
   brewData = data;
