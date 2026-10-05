@@ -20,6 +20,16 @@ extension DesktopApp {
     guard !busy else { return }
 
     switch action {
+    case "prepareCleanup":
+      guard let id = request["recoveryID"] as? String else { return }
+      prepareSavedCleanup(id: id, requestID: request["requestID"] as? String ?? UUID().uuidString)
+    case "startCleanup":
+      guard let token = request["token"] as? String, let plan = cleanupPlan, token == plan.token
+      else { return }
+      startSavedCleanup(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
+    case "discardCleanup":
+      guard let id = request["recoveryID"] as? String else { return }
+      discardSavedCleanup(id: id, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "prepareUninstall":
       guard let keys = request["keys"] as? [String], keys.count == 1 else { return }
       preparePackageRemoval(
@@ -47,11 +57,13 @@ extension DesktopApp {
       updateRequestID = nil
       updatePlan = nil
       removalPlan = nil
+      cleanupPlan = nil
       preparationControl?.cancel()
     } else if !busy {
       updateRequestID = nil
       updatePlan = nil
       removalPlan = nil
+      cleanupPlan = nil
       sendUpdate(["kind": "cancelled"])
     }
   }
@@ -63,6 +75,7 @@ extension DesktopApp {
     updateRequestID = requestID
     updatePlan = nil
     removalPlan = nil
+    cleanupPlan = nil
     sendUpdate(["kind": "checking", "requestID": requestID])
     let destination = output
     let control = UpgradePreparation()
@@ -189,6 +202,7 @@ extension DesktopApp {
     guard updateRequestID == requestID else {
       updatePlan = nil
       removalPlan = nil
+      cleanupPlan = nil
       sendUpdate(["kind": "cancelled"])
       return false
     }
@@ -209,7 +223,9 @@ extension DesktopApp {
     return Array(Set(names)).sorted()
   }
   private func permitClose() -> Bool {
-    guard updateInProgress || updatePlan != nil || removalPlan != nil else { return true }
+    guard updateInProgress || updatePlan != nil || removalPlan != nil || cleanupPlan != nil else {
+      return true
+    }
     sendUpdate([
       "kind": "closeBlocked",
       "message": updateInProgress

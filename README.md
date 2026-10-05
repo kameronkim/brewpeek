@@ -78,6 +78,12 @@ Homebrew manages the downloads and installation order. The progress panel shows 
 
 BrewPeek checks installed versions before reporting the results and refreshes the inventory. Failed or skipped items can be retried. Close a running app before updating it; if administrator permission is required, **View Terminal command** provides the command to run in Terminal. After running it, return to BrewPeek and refresh.
 
+## Removing packages
+
+Open a package's details and click **Uninstall**. This is available for casks and directly installed formulae. Review the selected package and any unused Formula dependencies before confirming. Shared and directly installed dependencies are kept.
+
+If removal or dependency cleanup does not finish, BrewPeek saves the unfinished task locally. On the next launch, it checks the current installation and shows the remaining work in **Uninstall results**. Nothing resumes automatically. **Retry cleanup** checks the remaining dependencies again and opens a new confirmation; changed installations are kept. **Close results** hides the panel, while **Discard pending cleanup** removes the saved task without removing installed packages.
+
 ## Checking your environment
 
 The **Environment** section shows your Homebrew installation prefix and version, Mac architecture, macOS version, and the disk usage of the Cellar and Caskroom. **Additional taps** lists the extra package repositories registered with Homebrew.

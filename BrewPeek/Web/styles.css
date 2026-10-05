@@ -1573,3 +1573,9 @@ html,
 #confirm[data-operation='uninstall'] .confirm-table col:nth-child(3),
 #confirm[data-operation='uninstall'] .confirm-table th:nth-child(3),
 #confirm[data-operation='uninstall'] .confirm-table td:nth-child(3) { display: none; }
+
+/* Cleanup recovery keeps the shared confirmation sheet's status column visible. */
+#confirm[data-operation='cleanup'] .confirm-table col:first-child { width: 45% !important; }
+#confirm[data-operation='cleanup'] .confirm-table col:nth-child(2) { width: 25% !important; }
+#confirm[data-operation='cleanup'] .confirm-table col:nth-child(3) { width: 30% !important; }
+.recovery-actions { justify-content: flex-start; margin: 16px 0; }
