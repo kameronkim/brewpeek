@@ -272,16 +272,17 @@ final class Inventory {
     let installed = try Self.validateInstalledInfo(raw)
     let formulae = installed.formulae
     let casks = installed.casks
-    let leaves = Set(lines(try run(brew, ["leaves"])))
+    let leaves = Set(lines(try run(brew, ["leaves"])).map(HomebrewPackageName.formulaIdentity))
     let taps = lines(try run(brew, ["tap"]))
     let prefix = try run(brew, ["--prefix"])
     let cellar = try run(brew, ["--cellar"])
     let caskroom = try run(brew, ["--caskroom"])
+    let formulaNames = Dictionary(grouping: formulae, by: \.name)
     var reverse: [String: Set<String>] = [:]
     for item in formulae {
-      let name = item.name
+      let label = (formulaNames[item.name]?.count ?? 0) > 1 ? item.fullName : item.name
       for dep in dependencies(item.raw) {
-        reverse[String(dep.split(separator: "/").last ?? Substring(dep)), default: []].insert(name)
+        reverse[HomebrewPackageName.formulaIdentity(dep), default: []].insert(label)
       }
     }
     var sizeRequests: [InventorySizeRequest] = []
@@ -303,10 +304,11 @@ final class Inventory {
         "availableVersion": nullable(updates.formulae[formula["full_name"] as? String ?? name]),
         "deprecated": formula["deprecated"] as? Bool ?? false,
         "type": "formula", "description": formula["desc"] ?? null, "tap": formula["tap"] ?? null,
-        "category": category(name, formula["desc"] as? String ?? ""), "leaf": leaves.contains(item.fullName),
+        "category": category(name, formula["desc"] as? String ?? ""),
+        "leaf": leaves.contains(HomebrewPackageName.formulaIdentity(item.fullName)),
         "direct": receipts.contains { $0["installed_on_request"] as? Bool == true },
         "homepage": formula["homepage"] ?? null, "dependencies": dependencies(formula),
-        "usedBy": Array(reverse[name] ?? []).sorted(),
+        "usedBy": Array(reverse[HomebrewPackageName.formulaIdentity(item.fullName)] ?? []).sorted(),
         "paths": versions.map { cellar + "/" + name + "/" + $0 },
         "size": null, "apps": [Record](),
       ])

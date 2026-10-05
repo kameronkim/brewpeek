@@ -3,6 +3,12 @@ import Foundation
 
 /// One identifier policy for installed metadata and confirmed package operations.
 enum HomebrewPackageName {
+  /// Only the official core prefix is an alias; external Tap names stay distinct.
+  static func formulaIdentity(_ name: String) -> String {
+    let prefix = "homebrew/core/"
+    return name.hasPrefix(prefix) ? String(name.dropFirst(prefix.count)) : name
+  }
+
   static func isValid(_ name: String) -> Bool {
     name.range(
       of: #"^[a-zA-Z0-9][a-zA-Z0-9@+_.-]*(/[a-zA-Z0-9][a-zA-Z0-9@+_.-]*){0,2}$"#,
