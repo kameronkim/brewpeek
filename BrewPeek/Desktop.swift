@@ -299,12 +299,22 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     }
   }
   func showLoadingFailure(useSavedData: Bool = false) {
-    loadingSpinner.stopAnimation(nil)
     if recoveringWebContent {
+      // The native worker still owns its request until it finishes.
+      guard !auxiliaryBusy, operationPhase == .idle else { return }
+      reportLoadID = nil
+      restoringWebState = false
       recoveringWebContent = false
       webRecoveryLoading = false
+      webRecoveryEvent = nil
+      operationPlan = nil
+      updateRequestID = nil
       pageReady = false
+      hasDisplayedData = false
+      web.isHidden = true
+      loading.isHidden = false
     }
+    loadingSpinner.stopAnimation(nil)
     if hasDisplayedData {
       loading.isHidden = true
       web.isHidden = false

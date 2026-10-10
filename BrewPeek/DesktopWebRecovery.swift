@@ -82,13 +82,13 @@ extension DesktopApp {
     ) { [weak self] result in
       guard let self, self.reportLoadID == loadID else { return }
       self.restoringWebState = false
-      self.recoveringWebContent = false
-      self.webRecoveryLoading = false
-      self.webRecoveryEvent = nil
       if case .failure(let error) = result {
         self.showLoadingFailure()
         self.showError(error.localizedDescription)
       } else {
+        self.recoveringWebContent = false
+        self.webRecoveryLoading = false
+        self.webRecoveryEvent = nil
         self.restorePendingRemoval()
       }
     }
