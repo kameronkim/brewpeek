@@ -1,0 +1,215 @@
+import Cocoa
+
+extension DesktopApp {
+  func preparePackageRemoval(key: String, requestID: String) {
+    preparePackagePlan(requestID: requestID, operation: "uninstall") { control, destination in
+      if let task = try RemovalTaskStore.load(at: destination), task.root.package.id != key {
+        throw InventoryError(
+          message: "Finish or discard the saved cleanup task before starting another uninstall.")
+      }
+      return .uninstall(
+        try PackageRemoval(brew: Inventory.locateBrew()).prepare(key: key, control: control))
+    }
+  }
+
+  func startPackageRemoval(_ plan: PackageRemovalPlan, requestID: String) {
+    let control = beginPackagePreparation(
+      requestID: requestID, rechecking: true, message: "Rechecking the selected package…")
+    let destination = output
+    DispatchQueue.global(qos: .userInitiated).async {
+      do {
+        let removal = PackageRemoval(brew: try Inventory.locateBrew())
+        try Upgrade.withLock(at: destination) {
+          if let task = try RemovalTaskStore.load(at: destination),
+            task.root.package.id != plan.package.id
+          {
+            throw InventoryError(
+              message: "Another saved cleanup task exists. Review it before continuing.")
+          }
+          let fresh = try removal.prepare(key: plan.package.id, control: control)
+          let shouldStart = DispatchQueue.main.sync { () -> Bool in
+            guard self.acceptRecheckedPlan(
+              .uninstall(fresh), unchanged: fresh.fingerprint == plan.fingerprint,
+              requestID: requestID
+            ) else { return false }
+            let active = self.runningApps(for: [fresh.package])
+            guard active.isEmpty else {
+              guard self.finishPreparation(requestID) else { return false }
+              self.sendUpdate([
+                "kind": "error", "runningApps": active, "requestID": requestID,
+                "message": "Close these apps before uninstalling: "
+                  + active.joined(separator: ", "),
+              ])
+              return false
+            }
+            return self.beginPackageExecution(record: fresh.record, requestID: requestID)
+          }
+          guard shouldStart else { return }
+          let task = RemovalTask(fresh)
+          try RemovalTaskStore.save(task, at: destination)
+          var result = try removal.execute(fresh) { event in
+            var event = event
+            event["requestID"] = requestID
+            DispatchQueue.main.async { self.sendUpdate(event) }
+          }
+          RemovalTaskStore.finishPreservingResult(task, result: &result, at: destination)
+          OperationInventory.append(
+            to: &result, inventory: removal.engine.inventory, destination: destination,
+            invalidatingSizes: Set(fresh.packages.map(\.id)), installedInfo: removal.engine.latestInstalledInfo)
+          result["retryKeys"] = [fresh.package.id]
+          result["requestID"] = requestID
+          var command = [
+            removal.engine.inventory.brew, "uninstall",
+            fresh.package.type == "cask" ? "--cask" : "--formula",
+          ]
+          if fresh.package.type == "formula" && fresh.package.current.count > 1 {
+            command.append("--force")
+          }
+          command.append(fresh.package.argument)
+          result["command"] =
+            "HOMEBREW_NO_AUTOREMOVE=1 "
+            + command
+            .map { "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'" }.joined(
+              separator: " ")
+          if (result["packages"] as? [Record])?.first?["actualVersion"] as? String
+            == "Not installed"
+          {
+            result.removeValue(forKey: "command")
+          }
+          let completed = result
+          DispatchQueue.main.async {
+            self.finishPackageOperation(completed, requestID: requestID)
+          }
+        }
+      } catch {
+        DispatchQueue.main.async {
+          guard self.finishPackageOperation([
+            "kind": "error", "message": error.localizedDescription,
+          ], requestID: requestID) else { return }
+          self.recoveryChecked = false
+          self.restorePendingRemoval()
+        }
+      }
+    }
+  }
+
+  func restorePendingRemoval() {
+    guard !recoveryChecked, !busy, inventoryRefreshState == "idle" else { return }
+    recoveryChecked = true
+    auxiliaryBusy = true
+    let control = UpgradePreparation()
+    preparationControl = control
+    sendUpdate(["kind": "recoveryChecking"])
+    let destination = output
+    DispatchQueue.global(qos: .userInitiated).async {
+      let result = Result<Record?, Error> {
+        try Upgrade.withLock(at: destination) {
+          guard let task = try RemovalTaskStore.load(at: destination) else { return nil }
+          let removal = PackageRemoval(brew: try Inventory.locateBrew())
+          var result = try removal.recoveryResult(task, control: control)
+          RemovalTaskStore.finishPreservingResult(task, result: &result, at: destination)
+          return result
+        }
+      }
+      DispatchQueue.main.async {
+        guard self.preparationControl === control else { return }
+        self.preparationControl = nil
+        self.auxiliaryBusy = false
+        switch result {
+        case .success(let record): self.sendUpdate(record ?? ["kind": "recoveryEmpty"])
+        case .failure(let error):
+          self.sendUpdate(["kind": "recoveryError", "message": error.localizedDescription])
+        }
+      }
+    }
+  }
+
+  func prepareSavedCleanup(id: String, requestID: String) {
+    preparePackagePlan(requestID: requestID, operation: "cleanup") { control, destination in
+      guard let task = try RemovalTaskStore.load(at: destination), task.id == id else {
+        throw InventoryError(message: "The saved cleanup task changed. Refresh before retrying.")
+      }
+      return .cleanup(
+        try PackageRemoval(brew: Inventory.locateBrew()).prepareCleanup(task, control: control))
+    }
+  }
+
+  func startSavedCleanup(_ plan: CleanupPlan, requestID: String) {
+    let control = beginPackagePreparation(
+      requestID: requestID, rechecking: true, operation: "cleanup",
+      message: "Rechecking remaining dependencies…")
+    let destination = output
+    DispatchQueue.global(qos: .userInitiated).async {
+      do {
+        let removal = PackageRemoval(brew: try Inventory.locateBrew())
+        try Upgrade.withLock(at: destination) {
+          guard let task = try RemovalTaskStore.load(at: destination), task.id == plan.task.id
+          else {
+            throw InventoryError(message: "The saved cleanup task changed. Review it again.")
+          }
+          let fresh = try removal.prepareCleanup(task, control: control)
+          let shouldStart = DispatchQueue.main.sync { () -> Bool in
+            guard self.acceptRecheckedPlan(
+              .cleanup(fresh), unchanged: fresh.fingerprint == plan.fingerprint,
+              requestID: requestID
+            ) else { return false }
+            return self.beginPackageExecution(record: fresh.record, requestID: requestID)
+          }
+          guard shouldStart else { return }
+          var result = try removal.executeCleanup(fresh) { event in
+            var event = event
+            event["requestID"] = requestID
+            DispatchQueue.main.async { self.sendUpdate(event) }
+          }
+          RemovalTaskStore.finishPreservingResult(
+            task, result: &result, at: destination, cleanup: true)
+          OperationInventory.append(
+            to: &result, inventory: removal.engine.inventory, destination: destination,
+            invalidatingSizes: Set(fresh.packages.map(\.id)), installedInfo: removal.engine.latestInstalledInfo)
+          result["requestID"] = requestID
+          let completed = result
+          DispatchQueue.main.async {
+            self.finishPackageOperation(completed, requestID: requestID)
+          }
+        }
+      } catch {
+        DispatchQueue.main.async {
+          guard self.finishPackageOperation([
+            "kind": "error", "message": error.localizedDescription,
+          ], requestID: requestID) else { return }
+          self.recoveryChecked = false
+          self.restorePendingRemoval()
+        }
+      }
+    }
+  }
+
+  func discardSavedCleanup(id: String, requestID: String) {
+    lastWebOperationKind = "cleanup-discard"
+    auxiliaryBusy = true
+    updateRequestID = requestID
+    let destination = output
+    DispatchQueue.global(qos: .userInitiated).async {
+      do {
+        try Upgrade.withLock(at: destination) {
+          try RemovalTaskStore.clear(at: destination, id: id)
+        }
+        DispatchQueue.main.async {
+          self.auxiliaryBusy = false
+          self.updateRequestID = nil
+          self.sendUpdate(["kind": "cleanupDiscarded", "requestID": requestID])
+        }
+      } catch {
+        DispatchQueue.main.async {
+          self.auxiliaryBusy = false
+          self.updateRequestID = nil
+          self.sendUpdate([
+            "kind": "error", "operation": "cleanup-discard",
+            "message": error.localizedDescription, "requestID": requestID,
+          ])
+        }
+      }
+    }
+  }
+
+}

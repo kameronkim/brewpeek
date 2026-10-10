@@ -2,20 +2,22 @@
 
 **Your installed Homebrew packages, at a glance.**
 
-BrewPeek is a macOS app for exploring the command-line tools and applications installed with Homebrew. It brings your package list, dependency information, and disk usage into one window, making it easier to understand your development environment and review what you have installed.
+BrewPeek is a macOS app for viewing and managing your installed Homebrew packages. Explore your package list, dependencies, and disk usage in one window, then update packages, uninstall them, or remove old versions.
 
 [한국어 설명서](README.ko.md)
 
+![BrewPeek installation overview and package list](docs/images/brewpeek-overview.png)
+
 ## Getting started
 
-With Homebrew installed on your Mac, open `BrewPeek.app`. BrewPeek shows your saved package list first while checking for current information. On first launch, it collects your installation information before displaying the list.
+Requires an Apple Silicon Mac with Homebrew installed. Download BrewPeek from [GitHub Releases](https://github.com/kameronkim/brewpeek/releases), extract the archive, and open `BrewPeek.app`. On first launch, the package list appears after BrewPeek collects your installation information.
 
 1. Check the overview for a summary of your installation.
 2. Search or filter the list to find a package.
 3. Click a package row to expand its details.
-4. After changing your Homebrew installation, click **Refresh**.
+4. After making changes outside BrewPeek, click **Refresh**.
 
-The app menus, loading messages, and native dialogs support English and Korean, following your macOS language preference, including an app-specific language preference for BrewPeek. The package inventory page is in English.
+The app menus, loading messages, and native dialogs use English or Korean according to your macOS language settings, including any language preference set specifically for BrewPeek. The package inventory page is in English.
 
 ## Reading the overview
 
@@ -31,7 +33,7 @@ The numbers at the top summarize your current installation.
 
 Below the overview, you can also see the number of explicitly requested formulae and the disk space used by the Cellar, where Homebrew stores formula installations.
 
-## Finding and sorting packages
+## Finding and filtering packages
 
 Enter a package name or description in **Search packages...**. Use **All categories** to narrow the list by category. Search, category selection, and the following filters work together.
 
@@ -49,22 +51,26 @@ The Updates filter includes both formulae and casks. If a refresh finds no avail
 
 **Direct** describes how a formula was installed; **Leaf** describes its dependency status. A formula can have both labels.
 
-Click **Name**, **Version**, or **Status** in a table header to sort the list. Click the same heading again to reverse the order. Status sorting is available for formulae. Section headings and sorting controls stay visible as you scroll through each list.
-
 ## Inspecting a package
 
-Click a package row to expand its details. Click it again to collapse it.
+The package list uses the following version information and labels.
 
-The **Version** column shows the installed version. When Homebrew reports an update, a smaller **Available: version** line appears underneath.
+| Display | Meaning |
+|---|---|
+| Version | The installed version |
+| Available | The new version when Homebrew reports an available update |
+| DEPRECATED | A package that Homebrew has deprecated |
 
-The detail view includes:
+Click a package row to expand the following details. Click it again to collapse them.
 
-- **Category and install origin** — The package category and whether a formula was explicitly requested.
-- **Homepage and source tap** — The project's website and the repository that provides the package.
-- **Dependencies** — Packages required by the installed package.
-- **Used by · Installed formulae** — Installed formulae that depend on this package.
-- **Disk usage and installed path** — The size and location of the Homebrew installation.
-- **Actual app** — For casks with an app bundle, the detected app's version, location, and size.
+| Field | Description |
+|---|---|
+| Category / Install origin | The package category and whether a formula was explicitly requested |
+| Homepage / Source tap | The project's website and the repository that provides the package |
+| Dependencies | Packages required by the installed package |
+| Used by · Installed formulae | Installed formulae that depend on this package |
+| Disk usage / Installed path | The size and location of the Homebrew installation |
+| Actual app | For casks with an app bundle, the detected app's version, location, and size |
 
 For casks, the Homebrew installation and the actual app bundle are shown separately, so you can inspect both the Caskroom record and the app itself.
 
@@ -72,11 +78,17 @@ For casks, the Homebrew installation and the actual app bundle are shown separat
 
 Click **Update** beside a package version, or **Update all** to update all available packages. Update all appears next to Refresh whenever updates are available, even if you are viewing a different filter.
 
-BrewPeek asks Homebrew to check the changes first. The confirmation table shows each package's **Current** and **New** versions, including related dependencies. Where the relationship is known, **Required by** or **Uses** explains why a related package is included. New dependencies are marked **Not installed**. Review the list and click **Update** to begin.
+BrewPeek asks Homebrew to check the changes first. The confirmation table shows each package's **Current** and **New** versions, including related dependencies. Where the relationship is known, **Required by** or **Uses** explains why a related package is included. New dependencies are marked **Not installed**. Close any apps being updated, then review the list and click **Update** to begin.
 
-Homebrew manages the downloads and installation order. The progress panel shows package activity and the number processed; expand **Package details** or **Show activity** for more information. Keep BrewPeek open until the operation finishes.
+Homebrew manages the downloads and installation order. Keep BrewPeek open until the operation finishes.
 
-BrewPeek checks installed versions before reporting the results and refreshes the inventory. Failed or skipped items can be retried. Close a running app before updating it; if administrator permission is required, **View Terminal command** provides the command to run in Terminal. After running it, return to BrewPeek and refresh.
+If Homebrew requires administrator permission during an update or uninstall, BrewPeek asks for your macOS account password in a secure input window. The password is not saved.
+
+## Removing packages and old versions
+
+Open a package's details and click **Uninstall** to remove a cask or directly installed formula. Review the package and any unused dependencies before confirming. Shared and directly installed dependencies are kept.
+
+For a formula with multiple installed versions, choose **Manage versions** to select old versions for removal. Homebrew determines which versions can be removed; versions still in use or required by other packages are kept. This action does not remove package caches or dependencies.
 
 ## Checking your environment
 
@@ -84,7 +96,9 @@ The **Environment** section shows your Homebrew installation prefix and version,
 
 ## Refreshing and saved data
 
-BrewPeek shows the saved inventory when it opens, then checks current installation information and new versions using Homebrew’s package information and update rules. You can search and inspect packages during a refresh; update actions become available when the check finishes. Use **Refresh** to collect it again after installing, updating, or removing packages with Homebrew. Refreshing keeps the existing page, search, filters, sort order, expanded details, and reading position. The footer shows when the displayed information was last collected. If collection fails, the saved inventory remains visible with a refresh failure status; use **Refresh** to try again.
+BrewPeek shows the saved inventory when it opens, then checks current installation information and available updates using Homebrew’s rules.
+
+Use **Refresh** after making changes outside BrewPeek. The footer shows when the displayed information was last collected.
 
 The latest inventory is saved locally at:
 

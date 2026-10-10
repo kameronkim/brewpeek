@@ -1,4 +1,3 @@
-import Darwin
 import Foundation
 
 struct UpgradePackage {
@@ -29,7 +28,6 @@ struct UpgradePlan {
   let token = UUID().uuidString
   let selected: [UpgradePackage]
   let packages: [UpgradePackage]
-  let output: String
   let excluded: [String]
   var fingerprint: [String] {
     packages.map { $0.id + "|" + $0.current.joined(separator: ",") + "|" + $0.next }.sorted()
@@ -37,184 +35,40 @@ struct UpgradePlan {
   var record: Record {
     [
       "token": token, "selectedCount": selected.count, "packages": packages.map(\.record),
-      "details": output, "excluded": excluded,
+      "excluded": excluded,
     ]
   }
-}
-
-/// Shared only between the UI cancellation action and the read-only preparation worker.
-final class UpgradePreparation {
-  private let lock = NSLock()
-  private var cancelled = false
-  private let deadline: TimeInterval
-  init(timeout: TimeInterval = 180) {
-    deadline = ProcessInfo.processInfo.systemUptime + timeout
-  }
-  func cancel() {
-    lock.lock()
-    cancelled = true
-    lock.unlock()
-  }
-  func check() throws {
-    lock.lock()
-    let stopped = cancelled
-    lock.unlock()
-    if stopped { throw InventoryError(message: "Update check cancelled.") }
-    if ProcessInfo.processInfo.systemUptime >= deadline {
-      throw InventoryError(message: "The update check timed out. Check your connection and retry.")
-    }
-  }
-}
-
-/// Keep recent activity in a byte-bounded buffer without splitting a UTF-8 scalar.
-private struct UpdateLogBuffer {
-  private static let byteLimit = 1_000_000
-  private var bytes = Data()
-  var isEmpty: Bool { bytes.isEmpty }
-  var text: String { String(decoding: bytes, as: UTF8.self) }
-
-  mutating func append(_ text: String) {
-    bytes.append(contentsOf: text.utf8)
-    if bytes.count > Self.byteLimit {
-      // Trim in batches to avoid copying the entire buffer for every new line.
-      bytes = Data(bytes.suffix(Self.byteLimit / 2).drop(while: { $0 & 0xc0 == 0x80 }))
-    }
-  }
-  mutating func removeAll() { bytes.removeAll(keepingCapacity: true) }
 }
 
 /// All commands run off the main thread. Arguments come from Homebrew metadata, never shell text.
 final class Upgrade {
   let inventory: Inventory
-  init(brew: String) { inventory = Inventory(brew: brew) }
-  static func validName(_ name: String) -> Bool {
-    name.range(
-      of: #"^[a-zA-Z0-9][a-zA-Z0-9@+_.-]*(/[a-zA-Z0-9][a-zA-Z0-9@+_.-]*){0,2}$"#,
-      options: .regularExpression) != nil
+  private var caskroom: String?
+  private let process: BrewProcess
+  private(set) var latestInstalledInfo: Record?
+  init(brew: String) {
+    inventory = Inventory(brew: brew)
+    process = BrewProcess(brew: brew)
   }
-  private func commandEnvironment() -> [String: String] {
-    var env = ProcessInfo.processInfo.environment
-    for name in [
-      "HOMEBREW_NO_AUTO_UPDATE", "HOMEBREW_NO_API_AUTO_UPDATE", "HOMEBREW_NO_ANALYTICS",
-      "HOMEBREW_NO_INSTALL_CLEANUP", "HOMEBREW_NO_ASK", "HOMEBREW_NO_UPGRADE_QUIT_CASKS",
-    ] { env[name] = "1" }
-    env["HOMEBREW_DOWNLOAD_CONCURRENCY"] = "auto"
-    env["SUDO_ASKPASS"] = "/usr/bin/false"
-    env["TERM"] = "dumb"
-    env["NO_COLOR"] = "1"
-    env["PATH"] =
-      URL(fileURLWithPath: inventory.brew).deletingLastPathComponent().path
-      + ":/usr/bin:/bin:/usr/sbin:/sbin"
-    return env
+  func readOnly(
+    _ arguments: [String], control: UpgradePreparation, combinedOutput: Bool = false,
+    environmentOverrides: [String: String] = [:]
+  ) throws -> String {
+    try process.readOnly(arguments, control: control, combinedOutput: combinedOutput,
+      environmentOverrides: environmentOverrides)
   }
-  /// File-backed output lets cancellation interrupt silent commands without waiting for pipe EOF.
-  /// Only info and upgrade --dry-run are accepted; mutating execution uses command() instead.
-  func readOnly(_ arguments: [String], control: UpgradePreparation, combinedOutput: Bool = false)
-    throws -> String
-  {
-    guard
-      arguments.first == "info" || (arguments.first == "upgrade" && arguments.contains("--dry-run"))
-    else {
-      throw InventoryError(message: "Invalid preparation command.")
-    }
-    try control.check()
-    let fm = FileManager.default
-    let dir = fm.temporaryDirectory.appendingPathComponent("brewpeek-prepare-" + UUID().uuidString)
-    try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-    defer { try? fm.removeItem(at: dir) }
-    let outURL = dir.appendingPathComponent("stdout")
-    let errURL = dir.appendingPathComponent("stderr")
-    fm.createFile(atPath: outURL.path, contents: nil)
-    fm.createFile(atPath: errURL.path, contents: nil)
-    let out = try FileHandle(forWritingTo: outURL)
-    let err = try FileHandle(forWritingTo: errURL)
-    defer {
-      try? out.close()
-      try? err.close()
-    }
-    let task = Process()
-    task.executableURL = URL(fileURLWithPath: inventory.brew)
-    task.arguments = arguments
-    task.environment = commandEnvironment()
-    task.standardInput = FileHandle.nullDevice
-    task.standardOutput = out
-    task.standardError = combinedOutput ? out : err
-    try task.run()
-    do {
-      while task.isRunning {
-        try control.check()
-        Thread.sleep(forTimeInterval: 0.05)
-      }
-      task.waitUntilExit()
-      try control.check()
-    } catch {
-      if task.isRunning {
-        task.terminate()
-        let grace = ProcessInfo.processInfo.systemUptime + 0.5
-        while task.isRunning && ProcessInfo.processInfo.systemUptime < grace {
-          Thread.sleep(forTimeInterval: 0.02)
-        }
-        if task.isRunning { kill(task.processIdentifier, SIGKILL) }
-      }
-      task.waitUntilExit()
-      throw error
-    }
-    let output = try String(contentsOf: outURL, encoding: .utf8)
-    guard task.terminationStatus == 0 else {
-      let detail = combinedOutput ? output : try String(contentsOf: errURL, encoding: .utf8)
-      throw InventoryError(
-        message: detail.isEmpty ? "Homebrew could not check the update plan." : detail)
-    }
-    return output
+  func dependencyProjection(_ script: String, control: UpgradePreparation) throws -> String {
+    try process.dependencyProjection(script, control: control)
   }
-  func command(_ arguments: [String], streaming: ((String) -> Void)? = nil) throws -> (
-    Int32, String
-  ) {
-    let task = Process()
-    let pipe = Pipe()
-    task.executableURL = URL(fileURLWithPath: inventory.brew)
-    task.arguments = arguments
-    task.environment = commandEnvironment()
-    task.standardInput = FileHandle.nullDevice
-    task.standardOutput = pipe
-    task.standardError = pipe
-    try task.run()
-    // Read continuously, draining both streams together. Never timeout/kill an installation.
-    var pending = Data()
-    var output = UpdateLogBuffer()
-    while true {
-      let chunk = pipe.fileHandleForReading.availableData
-      if chunk.isEmpty { break }
-      pending.append(chunk)
-      if pending.count > 262_144 {
-        var end = pending.index(pending.startIndex, offsetBy: 262_144)
-        while end > pending.startIndex && pending[end] & 0xc0 == 0x80 {
-          end = pending.index(before: end)
-        }
-        if end == pending.startIndex { end = pending.index(pending.startIndex, offsetBy: 262_144) }
-        let line = String(decoding: pending[..<end], as: UTF8.self)
-        pending.removeSubrange(..<end)
-        output.append(line)
-        streaming?(line)
-      }
-      while let end = pending.firstIndex(of: 10) {
-        let line = String(decoding: pending[..<end], as: UTF8.self).replacingOccurrences(
-          of: "\r", with: "")
-        pending.removeSubrange(...end)
-        output.append(line + "\n")
-        streaming?(line)
-      }
-    }
-    if !pending.isEmpty {
-      let line = String(decoding: pending, as: UTF8.self)
-      output.append(line)
-      streaming?(line)
-    }
-    task.waitUntilExit()
-    try? pipe.fileHandleForReading.close()
-    return (task.terminationStatus, output.text)
+  func command(
+    _ arguments: [String], environmentOverrides: [String: String] = [:],
+    streaming: ((String) -> Void)? = nil
+  ) throws -> (Int32, String) {
+    latestInstalledInfo = nil
+    return try process.command(
+      arguments, environmentOverrides: environmentOverrides, streaming: streaming)
   }
-  func json(_ arguments: [String], control: UpgradePreparation? = nil) throws -> Record {
+  private func readJSON(_ arguments: [String], control: UpgradePreparation?) throws -> Record {
     let text =
       try control.map { try readOnly(arguments, control: $0) }
       ?? inventory.run(inventory.brew, arguments)
@@ -223,12 +77,21 @@ final class Upgrade {
     }
     return object
   }
-  static func packages(_ info: Record) -> [UpgradePackage] {
+  /// Validate once, retaining the raw snapshot for inventory and typed fields for operations.
+  func installedMetadata(control: UpgradePreparation? = nil) throws
+    -> InstalledPackageInfo
+  {
+    latestInstalledInfo = nil
+    let raw = try readJSON(["info", "--json=v2", "--installed"], control: control)
+    let installed = try Inventory.validateInstalledInfo(raw)
+    latestInstalledInfo = raw
+    return installed
+  }
+  static func packages(_ info: InstalledPackageInfo, caskroom: String? = nil) -> [UpgradePackage] {
     var result: [UpgradePackage] = []
-    for f in info["formulae"] as? [Record] ?? [] {
-      guard let name = f["name"] as? String else { continue }
-      let full = f["full_name"] as? String ?? name
-      let installed = f["installed"] as? [Record] ?? []
+    for item in info.formulae {
+      let f = item.raw
+      let installed = item.receipts
       let revision = f["revision"] as? Int ?? 0
       let stable = (f["versions"] as? Record)?["stable"] as? String ?? ""
       let dependencies =
@@ -240,27 +103,23 @@ final class Upgrade {
         }
       result.append(
         UpgradePackage(
-          name: name, fullName: full, type: "formula",
-          current: installed.compactMap { $0["version"] as? String },
+          name: item.name, fullName: item.fullName, type: "formula",
+          current: item.versions,
           next: stable + (revision > 0 ? "_\(revision)" : ""),
           receipt: installed.map { String(describing: $0["time"] ?? "") }.joined(separator: ","),
           apps: [], reason: "Dependency",
           dependencies: dependencies.map { relationshipID($0, type: "formula") }))
     }
-    for c in info["casks"] as? [Record] ?? [] {
-      guard let name = c["token"] as? String else { continue }
-      let full = c["full_token"] as? String ?? name
-      let versions = c["installed"] as? [String] ?? (c["installed"] as? String).map { [$0] } ?? []
-      let apps = (c["artifacts"] as? [Record] ?? []).compactMap {
-        ($0["app"] as? [Any])?.first as? String
-      }
+    for item in info.casks {
+      let c = item.raw
+      let apps = CaskApps.paths(c, caskroom: caskroom)
       let dependencies = c["depends_on"] as? Record ?? [:]
       let dependencyIDs = ["formula", "cask"].flatMap { type in
         (dependencies[type] as? [String] ?? []).map { relationshipID($0, type: type) }
       }
       result.append(
         UpgradePackage(
-          name: name, fullName: full, type: "cask", current: versions,
+          name: item.name, fullName: item.fullName, type: "cask", current: item.versions,
           next: c["version"] as? String ?? "",
           receipt: String(describing: c["installed_time"] ?? ""), apps: apps, reason: "Dependency",
           dependencies: dependencyIDs))
@@ -304,8 +163,42 @@ final class Upgrade {
       return package
     }
   }
+  /// Share app path resolution without reparsing validated installed fields.
+  private func resolveCaskroom(_ casks: [Record], control: UpgradePreparation?) throws {
+    if caskroom == nil, casks.contains(where: CaskApps.needsAppDirectory) {
+      let path = try control.map { try readOnly(["--caskroom"], control: $0) }
+        ?? inventory.run(inventory.brew, ["--caskroom"])
+      let directory = path.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard directory.hasPrefix("/") else {
+        throw InventoryError(message: "Could not resolve Homebrew's Caskroom path.")
+      }
+      caskroom = directory
+    }
+  }
+  func resolvedPackages(_ info: Record, control: UpgradePreparation? = nil) throws
+    -> [UpgradePackage]
+  {
+    guard let casks = info["casks"] as? [Record] else {
+      throw InventoryError(message: "Homebrew returned incomplete update plan metadata.")
+    }
+    var metadata = info
+    // Homebrew represents an uninstalled Cask with null rather than an installed version.
+    metadata["casks"] = casks.map { raw -> Record in
+      var cask = raw
+      if cask["installed"] == nil || cask["installed"] is NSNull { cask["installed"] = [String]() }
+      return cask
+    }
+    let validated = try Inventory.validateInstalledInfo(metadata)
+    return try resolvedPackages(validated, control: control)
+  }
+  func resolvedPackages(_ info: InstalledPackageInfo, control: UpgradePreparation? = nil) throws
+    -> [UpgradePackage]
+  {
+    try resolveCaskroom(info.casks.map(\.raw), control: control)
+    return Self.packages(info, caskroom: caskroom)
+  }
   func installed(control: UpgradePreparation? = nil) throws -> [UpgradePackage] {
-    Self.packages(try json(["info", "--json=v2", "--installed"], control: control))
+    try resolvedPackages(installedMetadata(control: control), control: control)
   }
   /// Read only recognized plan blocks, then resolve every name through Homebrew JSON.
   static func plannedNames(_ text: String) throws -> [String] {
@@ -355,7 +248,7 @@ final class Upgrade {
         parts.contains("->") || (parts.count > 1 && parts[1].first?.isNumber == true)
         ? Array(parts.prefix(1)) : parts
       for name in candidates {
-        guard validName(name) else {
+        guard HomebrewPackageName.isValid(name) else {
           throw InventoryError(message: "Could not read Homebrew's update plan.\n" + text)
         }
         names.insert(name)
@@ -370,7 +263,7 @@ final class Upgrade {
   {
     let installed = try installed(control: control)
     let selected = try keys.map { id -> UpgradePackage in
-      guard var package = installed.first(where: { $0.id == id }), Self.validName(package.fullName)
+      guard var package = installed.first(where: { $0.id == id }), HomebrewPackageName.isValid(package.fullName)
       else {
         throw InventoryError(
           message: "The selected package is no longer installed. Refresh and try again.")
@@ -395,15 +288,19 @@ final class Upgrade {
       let matches = selected.filter { $0.fullName == name || $0.name == name }
       return matches.isEmpty ? [name] : matches.map(\.argument)
     }
-    let metadata = try json(["info", "--json=v2"] + arguments, control: control)
-    var packages = Self.packages(metadata)
+    let metadata = try readJSON(["info", "--json=v2"] + arguments, control: control)
+    var packages = try resolvedPackages(metadata, control: control)
+    func matches(_ package: UpgradePackage, _ name: String) -> Bool {
+      package.fullName == name || package.name == name || package.argument == name
+    }
     guard !packages.isEmpty,
-      packages.allSatisfy({ Self.validName($0.fullName) && !$0.next.isEmpty })
+      packages.allSatisfy({ HomebrewPackageName.isValid($0.fullName) && !$0.next.isEmpty }),
+      names.allSatisfy({ name in packages.contains { matches($0, name) } }),
+      packages.allSatisfy({ package in names.contains { matches(package, $0) } })
     else {
       throw InventoryError(message: "Could not resolve the versions in Homebrew's update plan.")
     }
-    var seen = Set<String>()
-    packages = packages.filter { seen.insert($0.id).inserted }.map { p in
+    packages = packages.map { p in
       var p = p
       p.reason =
         selected.contains(where: { $0.id == p.id })
@@ -418,7 +315,7 @@ final class Upgrade {
           + output)
     }
     return UpgradePlan(
-      selected: actionable, packages: Self.explainRelationships(packages), output: output,
+      selected: actionable, packages: Self.explainRelationships(packages),
       excluded: selected.filter { p in !actionable.contains(where: { $0.id == p.id }) }.map(\.name))
   }
 
@@ -429,6 +326,7 @@ final class Upgrade {
     var sentStates = states
     var packagesChanged = false
     var touched = Set<String>()
+    var activityMatcher = PackageActivityMatcher()
     var bufferedLines = UpdateLogBuffer()
     var lastEvent = Date.distantPast
     event(["kind": "progress", "packages": items.map(\.record), "states": states, "processed": 0])
@@ -467,7 +365,7 @@ final class Upgrade {
       {
         let names = line[range.upperBound...].components(separatedBy: ", ").map {
           $0.trimmingCharacters(in: .whitespacesAndNewlines)
-        }.filter(Self.validName)
+        }.filter(HomebrewPackageName.isValid)
         for name in names {
           if !items.contains(where: { $0.name == name || $0.fullName == name }) {
             let old = before.first(where: {
@@ -504,11 +402,7 @@ final class Upgrade {
       }
       // Output is activity, not proof of success. Percentages are intentionally not inferred.
       if let phase {
-        for p in items
-        where line.range(
-          of: "(?<![A-Za-z0-9@+_.-])" + NSRegularExpression.escapedPattern(for: p.name)
-            + "(?![A-Za-z0-9@+_.-])", options: .regularExpression) != nil
-        {
+        for p in items where activityMatcher.matches(p.name, in: line) {
           states[p.id] = phase
           if phase != "Downloading…" { touched.insert(p.id) }
         }
@@ -518,6 +412,8 @@ final class Upgrade {
       if Date().timeIntervalSince(lastEvent) >= 0.1 { flushActivity() }
     }
     if !bufferedLines.isEmpty { flushActivity() }
+    let commandWarning = result.0 == 0 ? ""
+      : "Homebrew exited with an error (code \(result.0)). Review activity for details."
     event(["kind": "verifying"])
     let after: [UpgradePackage]
     do { after = try installed() } catch {
@@ -530,8 +426,10 @@ final class Upgrade {
           var r = p.record
           r["outcome"] = "attention"
           r["message"] = "Could not verify installed version"
+          r["actualVersion"] = "Unknown"
           return r
-        }, "details": details.text, "verified": false,
+        }, "details": details.text, "verified": false, "exitCode": result.0,
+        "commandWarning": commandWarning,
       ]
     }
     items = items.map { p in
@@ -572,12 +470,15 @@ final class Upgrade {
       } else if result.0 == 0 {
         outcome = "attention"
         message = "Expected installed version could not be verified"
+      } else if result.1.contains("Administrator authentication cancelled.") {
+        outcome = "attention"
+        message = "Authentication cancelled. Retry when ready."
       } else if result.1.localizedCaseInsensitiveContains("sudo")
         || result.1.localizedCaseInsensitiveContains("permission")
         || result.1.localizedCaseInsensitiveContains("password")
       {
         outcome = "attention"
-        message = "May require administrator permission. Review activity and use Terminal."
+        message = "Administrator authentication did not complete. Review activity and retry."
       } else {
         outcome = touched.contains(p.id) ? "failed" : "skipped"
         message =
@@ -592,20 +493,10 @@ final class Upgrade {
     }
     return [
       "kind": "result", "packages": records, "details": result.1, "verified": true,
-      "exitCode": result.0,
+      "exitCode": result.0, "commandWarning": commandWarning,
     ]
   }
   static func withLock<T>(at output: URL, _ action: () throws -> T) throws -> T {
-    let dir = output.deletingLastPathComponent()
-    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let fd = open(dir.appendingPathComponent(".homebrew-report.lock").path, O_CREAT | O_RDWR, 0o600)
-    guard fd >= 0 else { throw InventoryError(message: "Could not open the operation lock.") }
-    defer { close(fd) }
-    guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
-      throw InventoryError(
-        message: "Another BrewPeek operation is running. Try again when it finishes.")
-    }
-    defer { flock(fd, LOCK_UN) }
-    return try action()
+    try HomebrewOperationLock.withLock(at: output, action)
   }
 }

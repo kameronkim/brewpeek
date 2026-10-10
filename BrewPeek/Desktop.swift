@@ -1,7 +1,33 @@
 import Cocoa
 import WebKit
 
-final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate,
+enum PackageOperationPhase {
+  case idle
+  case preparing
+  case rechecking
+  case running
+
+  var isPreparing: Bool { self == .preparing || self == .rechecking }
+  var isExecuting: Bool { self == .rechecking || self == .running }
+}
+
+enum PackageOperationPlan {
+  case update(UpgradePlan)
+  case uninstall(PackageRemovalPlan)
+  case cleanup(CleanupPlan)
+  case versions(VersionCleanupPlan)
+
+  var record: Record {
+    switch self {
+    case .update(let plan): return plan.record
+    case .uninstall(let plan): return plan.record
+    case .cleanup(let plan): return plan.record
+    case .versions(let plan): return plan.record
+    }
+  }
+}
+
+final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   NSMenuItemValidation, WKScriptMessageHandler, NSWindowDelegate
 {
   var window: NSWindow!
@@ -15,12 +41,25 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   var hasDisplayedData = false
   var inventoryRefreshState = "idle"
   var collectingInventory: Inventory?
-  var busy = false
-  var updateInProgress = false
+  // Inventory refresh, recovery inspection and app removal have separate lifetimes.
+  var auxiliaryBusy = false
+  var operationPhase: PackageOperationPhase = .idle
+  var busy: Bool { auxiliaryBusy || restoringWebState || operationPhase != .idle }
+  var updateInProgress: Bool { operationPhase.isExecuting }
   var updateRequestID: String?
-  var updatePreparing = false
+  var cancelledPreparationRequestID: String?
+  var updatePreparing: Bool { operationPhase.isPreparing }
   var preparationControl: UpgradePreparation?
-  var updatePlan: UpgradePlan?
+  var operationPlan: PackageOperationPlan?
+  var hasOperationPlan: Bool { operationPlan != nil }
+  var recoveryChecked = false
+  var recoveringWebContent = false
+  var webRecoveryLoading = false
+  var webRecoveryEvent: Record?
+  var lastOperationResult: Record?
+  var restoringWebState = false
+  var lastWebOperationKind = "update"
+  var webRecoveryKeys: [String] = []
   var output: URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("BrewPeek", isDirectory: true)
@@ -50,7 +89,6 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     config.userContentController.add(self, name: "packageUpdate")
     web = WKWebView(frame: .zero, configuration: config)
     web.navigationDelegate = self
-    web.uiDelegate = self
     web.allowsBackForwardNavigationGestures = false
     web.isHidden = true
     loadingSpinner.style = .spinning
@@ -151,9 +189,11 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     }
   }
   @objc func refresh() {
-    guard !busy, updatePlan == nil, updateRequestID == nil else { return }
+    guard !busy, !hasOperationPlan, updateRequestID == nil
+    else { return }
     reportLoadID = nil
-    busy = true
+    recoveryChecked = false
+    auxiliaryBusy = true
     inventoryRefreshState = "refreshing"
     refreshButton.isEnabled = false
     refreshButton.isHidden = true
@@ -190,9 +230,14 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   }
   func finishRefresh(error: Error? = nil) {
     collectingInventory = nil
-    busy = false
+    auxiliaryBusy = false
     inventoryRefreshState = error == nil ? "idle" : "failed"
     refreshButton.isEnabled = true
+    if recoveringWebContent {
+      reloadTerminatedWebContentIfReady()
+      if let error { showError(error.localizedDescription) }
+      return
+    }
     if let error {
       showLoadingFailure(useSavedData: true)
       sendRefreshState()
@@ -249,6 +294,8 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
               self.loadingSpinner.stopAnimation(nil)
               self.loading.isHidden = true
               self.web.isHidden = false
+              self.restoreWebOperationState()
+              self.restorePendingRemoval()
             }
           }
         case .failure(let error):
@@ -261,6 +308,21 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     }
   }
   func showLoadingFailure(useSavedData: Bool = false) {
+    if recoveringWebContent {
+      // The native worker still owns its request until it finishes.
+      guard !auxiliaryBusy, operationPhase == .idle else { return }
+      reportLoadID = nil
+      restoringWebState = false
+      recoveringWebContent = false
+      webRecoveryLoading = false
+      webRecoveryEvent = nil
+      operationPlan = nil
+      updateRequestID = nil
+      pageReady = false
+      hasDisplayedData = false
+      web.isHidden = true
+      loading.isHidden = false
+    }
     loadingSpinner.stopAnimation(nil)
     if hasDisplayedData {
       loading.isHidden = true
@@ -283,13 +345,15 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
     if menuItem.action == #selector(focusSearch) { return hasDisplayedData }
     if menuItem.action == #selector(removeApp) || menuItem.action == #selector(refresh) {
-      return !busy && updatePlan == nil && updateRequestID == nil
+      return !busy && !hasOperationPlan
+        && updateRequestID == nil
     }
     return true
   }
   @objc func removeApp() {
-    guard !busy, updatePlan == nil, updateRequestID == nil else { return }
-    busy = true
+    guard !busy, !hasOperationPlan, updateRequestID == nil
+    else { return }
+    auxiliaryBusy = true
     refreshButton.isEnabled = false
     let app = Bundle.main.bundleURL
     let reports = output.deletingLastPathComponent()
@@ -303,16 +367,16 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
     alert.addButton(withTitle: NSLocalizedString("Move to Trash", comment: ""))
     alert.beginSheetModal(for: window) { response in
       guard response == .alertSecondButtonReturn else {
-        self.busy = false
+        self.auxiliaryBusy = false
         self.refreshButton.isEnabled = true
         return
       }
       do {
         try DesktopRemoval.remove(app: app, reports: reports)
-        self.busy = false
+        self.auxiliaryBusy = false
         NSApp.terminate(nil)
       } catch {
-        self.busy = false
+        self.auxiliaryBusy = false
         self.refreshButton.isEnabled = true
         self.showError(error.localizedDescription)
       }
@@ -376,7 +440,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, W
   func applicationWillTerminate(_ notification: Notification) {
     reportLoadID = nil
     collectingInventory?.cancel()
-    preparationControl?.cancel()
+    preparationControl?.cancelAndWait()
   }
 }
 @main

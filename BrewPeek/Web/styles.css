@@ -301,11 +301,6 @@ h2 {
   font: 11px var(--mono);
   color: var(--secondary);
 }
-.section-subtitle {
-  font: 10px var(--mono);
-  color: var(--secondary);
-  letter-spacing: 0.07em;
-}
 table {
   width: 100%;
   border-collapse: collapse;
@@ -366,6 +361,20 @@ td:first-child {
   gap: 10px;
   text-align: left;
   font: 500 13px var(--mono);
+  max-width: 100%;
+}
+.package-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.deprecated-label {
+  flex: none;
+  padding: 2px 5px;
+  border: 1px solid var(--border);
+  color: var(--secondary);
+  font: 9px/1.2 var(--mono);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 .chevron {
   font-size: 11px;
@@ -426,12 +435,6 @@ td:first-child {
 .detail-field.wide {
   grid-column: span 2;
 }
-.detail-desc {
-  grid-column: 1/-1;
-  font: 13px var(--sans);
-  color: var(--text);
-  margin: 0;
-}
 .empty {
   margin: 0;
   min-height: 63px;
@@ -451,10 +454,6 @@ td:first-child {
 }
 .taps-list p {
   margin: 0 0 7px;
-}
-.quiet {
-  color: var(--secondary);
-  font: 12px/1.7 var(--sans);
 }
 .env {
   background: var(--surface);
@@ -487,19 +486,6 @@ footer {
   display: flex;
   justify-content: space-between;
   gap: 25px;
-}
-.method {
-  margin-top: 18px;
-  color: var(--secondary);
-  font-size: 12px;
-}
-.method summary {
-  cursor: pointer;
-  width: fit-content;
-}
-.method ul {
-  padding-left: 20px;
-  line-height: 1.8;
 }
 .sr-only {
   position: absolute;
@@ -645,9 +631,6 @@ mark {
     gap: 7px;
     margin-top: 9px;
   }
-  .section-subtitle {
-    display: none;
-  }
   .section {
     margin-top: 25px;
   }
@@ -707,9 +690,6 @@ mark {
   .detail-field {
     margin: 17px 0;
   }
-  .detail-desc {
-    margin-bottom: 15px;
-  }
   .env {
     grid-template-columns: 1fr;
     padding: 18px;
@@ -741,7 +721,6 @@ mark {
   }
   button,
   th,
-  .quiet,
   .description {
     color: #444;
   }
@@ -777,7 +756,7 @@ mark {
 }
 .package-table thead {
   position: sticky;
-  top: var(--toolbar-height, 120px);
+  top: calc(var(--toolbar-height, 120px) + var(--operation-summary-height, 0px));
   z-index: 4;
   background: var(--bg);
 }
@@ -963,12 +942,6 @@ mark {
   background: var(--surface);
   padding: 20px 22px;
 }
-.operation-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
 .eyebrow {
   font: 10px var(--mono);
   letter-spacing: 0.12em;
@@ -997,11 +970,6 @@ mark {
   white-space: pre-wrap;
   background: var(--bg);
   padding: 14px;
-}
-.step-count {
-  font: 11px var(--mono);
-  color: var(--secondary);
-  margin-right: 15px;
 }
 .pulse {
   display: inline-block;
@@ -1064,10 +1032,6 @@ dialog p {
   height: 78px;
 }
 @media (max-width: 620px) {
-  .operation-top {
-    align-items: flex-start;
-    flex-direction: column;
-  }
   .filter-actions {
     flex-wrap: wrap;
   }
@@ -1087,14 +1051,6 @@ dialog p {
   }
 }
 
-.progress-summary {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 22px 0 9px;
-  font: 11px var(--mono);
-  color: var(--secondary);
-}
 .progress-track {
   height: 3px;
   background: #30322c;
@@ -1105,17 +1061,22 @@ dialog p {
   background: var(--accent);
   transition: width 0.4s linear;
 }
-.download-list {
-  margin-top: 20px;
-}
 .download-item {
   display: grid;
-  grid-template-columns: 130px 1fr 170px;
+  grid-template-columns: 130px minmax(0, 1fr) 170px;
   align-items: center;
   gap: 22px;
   padding: 14px 0;
   border-top: 1px solid var(--border);
   font: 12px var(--mono);
+}
+.download-item > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+#progress-rows {
+  padding-right: 12px;
+  overflow-x: hidden;
 }
 .download-state {
   color: var(--secondary);
@@ -1124,15 +1085,6 @@ dialog p {
 }
 .download-item .progress-track {
   height: 2px;
-}
-.progress-caption {
-  font: 10px var(--mono);
-  color: var(--secondary);
-  margin-top: 8px;
-}
-.phase-tag {
-  color: var(--secondary);
-  font: 11px var(--mono);
 }
 .indeterminate .progress-fill {
   width: 30% !important;
@@ -1434,10 +1386,6 @@ body.modal-open {
 .issue-item button {
   flex-shrink: 0;
 }
-.discovered-note {
-  border-left: 2px solid #596248;
-  padding-left: 10px;
-}
 #notice pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1563,4 +1511,83 @@ html,
   #refresh.refreshing svg {
     animation: none;
   }
+}
+
+/* Cask removal shares the package operation and confirmation surfaces. */
+.detail-field.full, .detail-actions { grid-column: 1 / -1; }
+.detail-actions { display: flex; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }
+#confirm[data-operation='uninstall'] .confirm-table col:first-child { width: 52% !important; }
+#confirm[data-operation='uninstall'] .confirm-table col:nth-child(2) { width: 48% !important; }
+#confirm[data-operation='uninstall'] .confirm-table col:nth-child(3),
+#confirm[data-operation='uninstall'] .confirm-table th:nth-child(3),
+#confirm[data-operation='uninstall'] .confirm-table td:nth-child(3) { display: none; }
+
+/* Cleanup recovery keeps the shared confirmation sheet's status column visible. */
+#confirm[data-operation='cleanup'] .confirm-table col:first-child { width: 45% !important; }
+#confirm[data-operation='cleanup'] .confirm-table col:nth-child(2) { width: 25% !important; }
+#confirm[data-operation='cleanup'] .confirm-table col:nth-child(3) { width: 30% !important; }
+.recovery-actions { justify-content: flex-start; margin: 16px 0; }
+
+.version-choice { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
+.version-choice input { accent-color: var(--accent); flex: none; }
+.version-choice input:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
+
+/* One in-flow summary remains sticky throughout the inventory, without a fixed-position swap. */
+#operation-anchor {
+  height: 22px;
+}
+#operation-summary {
+  position: sticky;
+  top: var(--toolbar-height, 120px);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px 22px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.operation-summary-heading {
+  min-width: 0;
+}
+.operation-summary-heading .eyebrow {
+  margin-bottom: 5px;
+}
+.operation-summary-heading h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.operation-summary-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 12px;
+}
+.operation-summary-count {
+  font: 11px var(--mono);
+  color: var(--secondary);
+  white-space: nowrap;
+}
+#operation-view {
+  min-width: 106px;
+}
+#operation-summary:not([hidden]) + #operation .operation {
+  margin-top: 0;
+  border-top: 0;
+}
+@media (max-width: 700px) {
+  #operation-summary {padding: 10px 16px; gap: 12px;}
+  .operation-summary-actions {gap: 8px;}
+  .operation-summary-count {display: none;}
+  #operation-view {min-width: auto;}
+}
+
+#operation-summary:not([hidden]) + #operation .operation > p:first-child {
+  margin-top: 0;
 }
