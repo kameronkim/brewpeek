@@ -36,12 +36,16 @@ function restoreInventoryFocus(focus) {
 }
 function captureInventoryView() {
   const toolbarBottom = document.querySelector('.toolbar').getBoundingClientRect().bottom;
+  const summary = $('operation-summary');
+  const summaryRect = summary?.hidden === false ? summary.getBoundingClientRect() : null;
+  const fixedBottom = summaryRect && summaryRect.top <= toolbarBottom + 1
+    ? Math.max(toolbarBottom, summaryRect.bottom) : toolbarBottom;
   const headers = [...document.querySelectorAll('.package-table thead')].map((h) =>
     h.getBoundingClientRect()
   );
   const top = Math.max(
-    toolbarBottom,
-    ...headers.filter((h) => h.top <= toolbarBottom + 1).map((h) => h.bottom)
+    fixedBottom,
+    ...headers.filter((h) => h.top <= fixedBottom + 1).map((h) => h.bottom)
   );
   const rows = [...document.querySelectorAll('.package-row')];
   // An expanded detail may occupy the viewport while its parent row is above it.

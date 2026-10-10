@@ -44,6 +44,51 @@ function setUpdateMode(mode) {
   updateMode = mode;
   syncActionAvailability();
 }
+function clearOperationSummary() {
+  $('operation-summary').replaceChildren();
+  $('operation-summary').hidden = true;
+  $('operation-anchor').hidden = true;
+  updateOperationSummaryHeight();
+}
+function updateOperationSummaryHeight() {
+  const summary = $('operation-summary');
+  document.documentElement.style.setProperty(
+    '--operation-summary-height', summary.hidden ? '0px' : `${summary.getBoundingClientRect().height}px`
+  );
+}
+new ResizeObserver(updateOperationSummaryHeight).observe($('operation-summary'));
+function mountOperationSummary(running) {
+  const operation = $('operation');
+  const top = operation.querySelector('.operation-top');
+  const summary = $('operation-summary');
+  const heading = document.createElement('div');
+  heading.className = 'operation-summary-heading';
+  heading.append(top.querySelector('.eyebrow'), top.querySelector('h3'));
+  const actions = document.createElement('div');
+  actions.className = 'operation-summary-actions';
+  const processed = operation.querySelector('#processed');
+  if (running && processed) {
+    processed.className = 'operation-summary-count';
+    actions.append(processed);
+    document.querySelector('#operation .progress-summary').remove();
+  }
+  const view = document.createElement('button');
+  view.className = 'subtle-btn';
+  view.id = 'operation-view';
+  view.textContent = running ? 'View progress' : 'View results';
+  view.onclick = () => {
+    const details = document.querySelector('#operation details');
+    if (details) details.open = true;
+    scrollOperationIntoView();
+  };
+  actions.append(view);
+  const dismiss = operation.querySelector('#dismiss');
+  if (dismiss) actions.append(dismiss);
+  summary.replaceChildren(heading, actions);
+  summary.hidden = false;
+  $('operation-anchor').hidden = false;
+  updateOperationSummaryHeight();
+}
 function scrollOperationIntoView() {
   const frame = document.querySelector('#operation .operation');
   if (!frame) return;
@@ -53,8 +98,9 @@ function scrollOperationIntoView() {
   }
   operationScrollPending = false;
   const toolbarHeight = document.querySelector('.toolbar').getBoundingClientRect().height;
-  const frameSpacing = parseFloat(getComputedStyle(frame).marginTop);
-  const top = scrollY + frame.getBoundingClientRect().top - toolbarHeight - frameSpacing;
+  const anchor = $('operation-summary').hidden ? frame : $('operation-anchor');
+  const spacing = anchor === frame ? parseFloat(getComputedStyle(frame).marginTop) : 0;
+  const top = scrollY + anchor.getBoundingClientRect().top - toolbarHeight - spacing;
   scrollTo(scrollX, Math.max(0, top));
 }
 function lockBackground() {
@@ -333,6 +379,7 @@ function beginProgress(plan) {
   setUpdateMode('running');
   $('operation').innerHTML =
     `<section class="operation" data-operation="${operationKind}"><div class="operation-top"><div><div class="eyebrow" id="operation-phase">${operationKind === 'version-cleanup' ? 'VERSION CLEANUP IN PROGRESS' : operationKind === 'cleanup' ? 'CLEANUP IN PROGRESS' : operationKind === 'uninstall' ? 'UNINSTALL IN PROGRESS' : 'UPDATE IN PROGRESS'}</div><h3><span class="pulse"></span><span id="operation-title">${operationKind === 'version-cleanup' ? 'Removing old versions' : operationKind === 'cleanup' ? 'Removing unused dependencies' : operationKind === 'uninstall' ? `Uninstalling ${esc(plan.packages[0].name)}` : 'Updating packages'}</span></h3><p id="operation-copy">${operationKind === 'version-cleanup' ? 'Homebrew is removing only the selected old versions.' : operationKind === 'cleanup' ? 'Homebrew is removing the confirmed remaining dependencies.' : operationKind === 'uninstall' ? 'Homebrew is removing the selected package and any confirmed unused dependencies.' : 'Homebrew controls parallel downloads and installation order.'}</p></div></div><div class="progress-summary"><span>Packages processed · including dependencies</span><span id="processed">0 of ${progressPackages.length}</span></div><div class="progress-track"><div class="progress-fill" id="overall-fill"></div></div><p id="discovered" hidden>Additional related changes detected. The total includes these packages.</p><details id="progress-items"><summary id="progress-count"></summary><div class="bounded-list" id="progress-rows"></div></details><details id="progress-log"><summary>Show activity</summary><pre id="activity-log"></pre></details></section>`;
+  mountOperationSummary(true);
   $('progress-items').ontoggle = () => paintProgress();
   $('progress-log').ontoggle = paintActivity;
   paintProgress(0);
@@ -400,6 +447,7 @@ function paintResult(result) {
   const issues = result.packages.filter((p) => !['updated', 'installed', 'uninstalled', 'kept', 'removed'].includes(p.outcome));
   $('operation').innerHTML =
     `<section class="operation"><div class="operation-top"><div><div class="eyebrow">${versions ? 'VERSION CLEANUP RESULTS' : uninstall ? 'UNINSTALL RESULTS' : 'UPDATE RESULTS'}</div><h3>${esc(recoveryTitle || summary)}</h3><p>${versions ? (result.verified ? 'Installed versions checked.' : 'Installed versions could not be checked.') : uninstall ? (result.verified ? 'Homebrew package registrations checked.' : 'Package registrations could not be checked.') : (result.verified ? 'Installed versions checked.' : 'Installed versions could not be checked.')}${result.refreshError ? ' Inventory refresh failed; use Refresh to try again.' : ''}</p></div><button class="subtle-btn" id="dismiss">Close results</button></div>${result.commandWarning ? `<p role="status">${esc(result.commandWarning)}</p>` : ''}${result.recoveryError ? `<p role="status">${esc(result.recoveryError)}</p>` : ''}${result.recovered ? '<p>Current Homebrew registrations checked. Nothing has resumed automatically.</p>' : ''}${result.recoveryID ? `<div class="dialog-actions recovery-actions">${pending ? '<button class="subtle-btn" id="retry-cleanup">Retry cleanup</button>' : ''}<button class="subtle-btn" id="discard-cleanup">Discard pending cleanup</button></div>${pending ? '<p>Remaining dependencies are checked again before removal. The task stays saved if the app closes.</p>' : ''}` : ''}${issues.length ? `<div class="issues">${issues.map((p) => `<div class="issue-item"><div><strong>${esc(p.name)}</strong><p>${esc(p.message)}</p></div>${!uninstall || (!pending && p.id === result.packages[0].id && p.actualVersion !== 'Not installed') ? `<button class="subtle-btn" data-retry="${esc(p.id)}">Retry</button>` : ''}</div>`).join('')}</div>` : ''}<details><summary>All results · ${result.packages.length}</summary><ul class="result-list bounded-list">${result.packages.map((p) => `<li>${esc(p.name)}<span>${esc(p.message)}<small class="dependency-note">${versions ? 'Version' : uninstall ? 'Registration' : 'Installed'}: ${esc(p.actualVersion)}</small></span></li>`).join('')}</ul></details><details id="result-log"><summary>Show activity</summary><pre></pre></details>${issues.length && result.command ? '<div class="dialog-actions"><button class="subtle-btn" id="terminal-help">View Terminal command</button></div>' : ''}</section>`;
+  mountOperationSummary(false);
   const log = $('result-log');
   let activityRendered = false;
   log.ontoggle = () => {
@@ -416,6 +464,7 @@ function paintResult(result) {
     requestedKeys = [];
     activeRequest = null;
     $('operation').replaceChildren();
+    clearOperationSummary();
     setUpdateMode('ready');
     restoreInventoryView(view);
   };
@@ -509,7 +558,6 @@ window.receiveUpdate = function (event) {
       restoreInventoryView(view);
       syncActionAvailability();
       finishNotice();
-      if (!result.recovered) scrollOperationIntoView();
       break;
     }
     case 'error':
@@ -522,9 +570,11 @@ window.receiveUpdate = function (event) {
       activeRequest = null;
       setUpdateMode(previousResult ? 'result' : 'ready');
       if (previousResult) paintResult(previousResult);
-      else
+      else {
+        clearOperationSummary();
         $('operation').innerHTML =
           `<section class="operation"><div class="eyebrow">${operationKind === 'uninstall' ? 'UNINSTALL UNAVAILABLE' : 'UPDATE UNAVAILABLE'}</div><h3>Could not complete the operation</h3><p>Review the details and try again.</p><details open><summary>Details</summary><pre>${esc(event.message)}</pre></details><div class="dialog-actions"><button class="subtle-btn" id="retry-check">Retry check</button></div></section>`;
+      }
       if ($('retry-check'))
         $('retry-check').onclick = () => retryOperation($('retry-check'));
       if (previousResult) showNotice(operationKind === 'uninstall' ? 'Could not uninstall package' : 'Could not check updates', event.message);

@@ -756,7 +756,7 @@ mark {
 }
 .package-table thead {
   position: sticky;
-  top: var(--toolbar-height, 120px);
+  top: calc(var(--toolbar-height, 120px) + var(--operation-summary-height, 0px));
   z-index: 4;
   background: var(--bg);
 }
@@ -1081,12 +1081,20 @@ dialog p {
 }
 .download-item {
   display: grid;
-  grid-template-columns: 130px 1fr 170px;
+  grid-template-columns: 130px minmax(0, 1fr) 170px;
   align-items: center;
   gap: 22px;
   padding: 14px 0;
   border-top: 1px solid var(--border);
   font: 12px var(--mono);
+}
+.download-item > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+#progress-rows {
+  padding-right: 12px;
+  overflow-x: hidden;
 }
 .download-state {
   color: var(--secondary);
@@ -1541,3 +1549,62 @@ html,
 .version-choice { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; }
 .version-choice input { accent-color: var(--accent); flex: none; }
 .version-choice input:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
+
+/* One in-flow summary remains sticky throughout the inventory, without a fixed-position swap. */
+#operation-anchor {
+  height: 22px;
+}
+#operation-summary {
+  position: sticky;
+  top: var(--toolbar-height, 120px);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 12px 22px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+}
+.operation-summary-heading {
+  min-width: 0;
+}
+.operation-summary-heading .eyebrow {
+  margin-bottom: 5px;
+}
+.operation-summary-heading h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.operation-summary-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 12px;
+}
+.operation-summary-count {
+  font: 11px var(--mono);
+  color: var(--secondary);
+  white-space: nowrap;
+}
+#operation-view {
+  min-width: 106px;
+}
+#operation-summary:not([hidden]) + #operation .operation {
+  margin-top: 0;
+  border-top: 0;
+}
+#operation-summary:not([hidden]) + #operation .operation-top p {
+  margin-top: 0;
+}
+@media (max-width: 700px) {
+  #operation-summary {padding: 10px 16px; gap: 12px;}
+  .operation-summary-actions {gap: 8px;}
+  .operation-summary-count {display: none;}
+  #operation-view {min-width: auto;}
+}
