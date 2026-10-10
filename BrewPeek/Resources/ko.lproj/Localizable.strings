@@ -49,3 +49,6 @@
 "Uninstalling: %@" = "삭제: %@";
 "Updating: %@" = "업데이트: %@";
 "Authentication was not accepted. Please try again." = "인증에 실패했습니다. 다시 입력해 주세요.";
+
+"Waiting for Homebrew to finish…" = "Homebrew 작업이 끝나기를 기다리는 중…";
+"Restoring BrewPeek…" = "BrewPeek 복원 중…";

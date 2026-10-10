@@ -3,6 +3,12 @@ import WebKit
 
 extension DesktopApp {
   func sendUpdate(_ event: Record) {
+    rememberWebOperationEvent(event)
+    if recoveringWebContent {
+      reloadTerminatedWebContentIfReady()
+      return
+    }
+    guard pageReady else { return }
     web.callAsyncJavaScript(
       "window.receiveUpdate(event)", arguments: ["event": event], in: nil, in: .page
     ) { result in
@@ -13,12 +19,19 @@ extension DesktopApp {
   }
   func handleUpdate(_ body: Any) {
     guard let request = body as? Record, let action = request["action"] as? String else { return }
+    if action == "dismissResults" {
+      guard !busy, !hasOperationPlan else { return }
+      lastOperationResult = nil
+      return
+    }
     if action == "cancel" {
       cancelUpdatePreparation()
       return
     }
     guard !busy else { return }
 
+    if ["prepare", "prepareUninstall", "prepareVersions"].contains(action),
+      let keys = request["keys"] as? [String] { webRecoveryKeys = keys }
     switch action {
     case "prepareVersions":
       guard let keys = request["keys"] as? [String], keys.count == 1 else { return }
@@ -95,7 +108,7 @@ extension DesktopApp {
   }
 
   private func prepareUpdate(keys: [String], requestID: String) {
-    let control = beginPackagePreparation(requestID: requestID)
+    let control = beginPackagePreparation(requestID: requestID, operation: "update")
     let destination = output
     DispatchQueue.global(qos: .userInitiated).async {
       do {
@@ -132,7 +145,7 @@ extension DesktopApp {
       return
     }
     let control = beginPackagePreparation(
-      requestID: requestID, rechecking: true, message: "Rechecking the confirmed plan…")
+      requestID: requestID, rechecking: true, operation: "update", message: "Rechecking the confirmed plan…")
     let destination = output
     DispatchQueue.global(qos: .userInitiated).async {
       do {

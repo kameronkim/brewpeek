@@ -461,6 +461,7 @@ function paintResult(result) {
   $('dismiss').onclick = () => {
     const view = captureInventoryView();
     previousResult = null;
+    postUpdate({ action: 'dismissResults' });
     requestedKeys = [];
     activeRequest = null;
     $('operation').replaceChildren();
@@ -614,3 +615,22 @@ function confirmDiscardCleanup(trigger) {
   $('start').textContent = 'Discard task';
   $('confirm-title').focus({preventScroll: true});
 }
+
+// A terminated web process is restored only after the native worker finishes.
+// Replaying display events never posts a package command back to Swift.
+window.restoreUpdateState = function (events) {
+  for (const event of events) {
+    activeRequest = event.requestID || null;
+    if (event.retryKeys) requestedKeys = event.retryKeys;
+    if (event.plan) {
+      operationKind = event.plan.operation || 'update';
+      requestedKeys = event.plan.operation === 'version-cleanup'
+        ? [event.plan.key]
+        : event.plan.packages.filter((p) => p.reason === 'Selected').map((p) => p.id);
+    } else if (event.kind === 'result') {
+      operationKind = event.operation || 'update';
+      requestedKeys = event.retryKeys || [];
+    }
+    window.receiveUpdate(event);
+  }
+};

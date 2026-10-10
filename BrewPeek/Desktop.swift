@@ -35,7 +35,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   // Inventory refresh, recovery inspection and app removal have separate lifetimes.
   var auxiliaryBusy = false
   var operationPhase: PackageOperationPhase = .idle
-  var busy: Bool { auxiliaryBusy || operationPhase != .idle }
+  var busy: Bool { auxiliaryBusy || restoringWebState || operationPhase != .idle }
   var updateInProgress: Bool { operationPhase.isExecuting }
   var updateRequestID: String?
   var cancelledPreparationRequestID: String?
@@ -44,6 +44,13 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   var operationPlan: PackageOperationPlan?
   var hasOperationPlan: Bool { operationPlan != nil }
   var recoveryChecked = false
+  var recoveringWebContent = false
+  var webRecoveryLoading = false
+  var webRecoveryEvent: Record?
+  var lastOperationResult: Record?
+  var restoringWebState = false
+  var lastWebOperationKind = "update"
+  var webRecoveryKeys: [String] = []
   var output: URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("BrewPeek", isDirectory: true)
@@ -217,6 +224,11 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     auxiliaryBusy = false
     inventoryRefreshState = error == nil ? "idle" : "failed"
     refreshButton.isEnabled = true
+    if recoveringWebContent {
+      reloadTerminatedWebContentIfReady()
+      if let error { showError(error.localizedDescription) }
+      return
+    }
     if let error {
       showLoadingFailure(useSavedData: true)
       sendRefreshState()
@@ -273,6 +285,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
               self.loadingSpinner.stopAnimation(nil)
               self.loading.isHidden = true
               self.web.isHidden = false
+              self.restoreWebOperationState()
               self.restorePendingRemoval()
             }
           }
@@ -287,6 +300,11 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   }
   func showLoadingFailure(useSavedData: Bool = false) {
     loadingSpinner.stopAnimation(nil)
+    if recoveringWebContent {
+      recoveringWebContent = false
+      webRecoveryLoading = false
+      pageReady = false
+    }
     if hasDisplayedData {
       loading.isHidden = true
       web.isHidden = false
