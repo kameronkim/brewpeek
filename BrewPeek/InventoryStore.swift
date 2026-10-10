@@ -3,12 +3,20 @@ import Foundation
 /// The single persisted snapshot; UI assets always live in the app bundle.
 enum InventoryStore {
   static func decode(_ data: Data) throws -> [String: Any] {
+    guard let value = try JSONSerialization.jsonObject(with: data) as? Record else {
+      throw InventoryError(
+        message: NSLocalizedString("The saved inventory has an invalid format.", comment: ""))
+    }
+    return try normalize(value)
+  }
+
+  private static func normalize(_ snapshot: Record) throws -> Record {
+    var value = snapshot
     func invalid() -> InventoryError {
       InventoryError(
         message: NSLocalizedString("The saved inventory has an invalid format.", comment: ""))
     }
-    guard var value = try JSONSerialization.jsonObject(with: data) as? Record,
-      let formulae = value["formulae"] as? [Record], let casks = value["casks"] as? [Record],
+    guard let formulae = value["formulae"] as? [Record], let casks = value["casks"] as? [Record],
       value["taps"] is [String], var environment = value["environment"] as? Record,
       let updated = environment["updated"] as? String, !updated.isEmpty
     else { throw invalid() }
@@ -87,7 +95,7 @@ enum InventoryStore {
   static func save(_ value: [String: Any], to url: URL) throws {
     var snapshot = value
     snapshot["schemaVersion"] = 1
-    let normalized = try decode(JSONSerialization.data(withJSONObject: snapshot))
+    let normalized = try normalize(snapshot)
     let data = try JSONSerialization.data(
       withJSONObject: normalized, options: [.sortedKeys, .prettyPrinted])
     try data.write(to: url, options: .atomic)
