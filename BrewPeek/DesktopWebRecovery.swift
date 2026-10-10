@@ -65,14 +65,7 @@ extension DesktopApp {
       }
       events.append(pending)
     } else if let plan = operationPlan {
-      let record: Record
-      switch plan {
-      case .update(let value): record = value.record
-      case .uninstall(let value): record = value.record
-      case .cleanup(let value): record = value.record
-      case .versions(let value): record = value.record
-      }
-      events.append(["kind": "plan", "plan": record, "requestID": updateRequestID ?? ""])
+      events.append(["kind": "plan", "plan": plan.record, "requestID": updateRequestID ?? ""])
     }
     // No worker can be admitted while restoration is delivering its state.
     restoringWebState = true

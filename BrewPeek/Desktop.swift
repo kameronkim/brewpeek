@@ -16,6 +16,15 @@ enum PackageOperationPlan {
   case uninstall(PackageRemovalPlan)
   case cleanup(CleanupPlan)
   case versions(VersionCleanupPlan)
+
+  var record: Record {
+    switch self {
+    case .update(let plan): return plan.record
+    case .uninstall(let plan): return plan.record
+    case .cleanup(let plan): return plan.record
+    case .versions(let plan): return plan.record
+    }
+  }
 }
 
 final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,

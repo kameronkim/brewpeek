@@ -108,27 +108,8 @@ extension DesktopApp {
   }
 
   private func prepareUpdate(keys: [String], requestID: String) {
-    let control = beginPackagePreparation(requestID: requestID, operation: "update")
-    let destination = output
-    DispatchQueue.global(qos: .userInitiated).async {
-      do {
-        let engine = Upgrade(brew: try Inventory.locateBrew())
-        let plan = try Upgrade.withLock(at: destination) {
-          try engine.prepare(keys: keys, control: control)
-        }
-        DispatchQueue.main.async {
-          guard self.finishPreparation(requestID) else { return }
-          self.operationPlan = .update(plan)
-          self.sendUpdate(["kind": "plan", "plan": plan.record, "requestID": requestID])
-        }
-      } catch {
-        DispatchQueue.main.async {
-          guard self.finishPreparation(requestID) else { return }
-          self.sendUpdate([
-            "kind": "error", "message": error.localizedDescription, "requestID": requestID,
-          ])
-        }
-      }
+    preparePackagePlan(requestID: requestID, operation: "update") { control, _ in
+      .update(try Upgrade(brew: Inventory.locateBrew()).prepare(keys: keys, control: control))
     }
   }
 
@@ -152,18 +133,12 @@ extension DesktopApp {
         let engine = Upgrade(brew: try Inventory.locateBrew())
         try Upgrade.withLock(at: destination) {
           let fresh = try engine.prepare(keys: plan.selected.map(\.id), control: control)
-          guard fresh.fingerprint == plan.fingerprint else {
-            DispatchQueue.main.async {
-              guard self.finishPreparation(requestID) else { return }
-              self.operationPlan = .update(fresh)
-              self.sendUpdate([
-                "kind": "plan", "plan": fresh.record, "changed": true, "requestID": requestID,
-              ])
-            }
-            return
-          }
           let shouldStart = DispatchQueue.main.sync {
-            self.beginPreparedUpdate(fresh, requestID: requestID)
+            guard self.acceptRecheckedPlan(
+              .update(fresh), unchanged: fresh.fingerprint == plan.fingerprint,
+              requestID: requestID
+            ) else { return false }
+            return self.beginPreparedUpdate(fresh, requestID: requestID)
           }
           guard shouldStart else { return }
           var result = try engine.execute(fresh) { event in
@@ -211,10 +186,7 @@ extension DesktopApp {
       ])
       return false
     }
-    operationPhase = .running
-    preparationControl = nil
-    sendUpdate(["kind": "started", "plan": plan.record, "requestID": requestID])
-    return true
+    return beginPackageExecution(record: plan.record, requestID: requestID)
   }
 
   /// Runs on the main queue, including the final cancellation gate before mutation.
