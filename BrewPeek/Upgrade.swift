@@ -458,11 +458,20 @@ final class Upgrade {
         next: actual.current.last ?? "", receipt: p.receipt, apps: actual.apps, reason: p.reason,
         dependencies: actual.dependencies, relationship: p.relationship)
     }
+    let cleanupOnlyIDs = Set(after.compactMap { actual -> String? in
+      guard let old = before.first(where: { $0.id == actual.id }),
+        Self.onlyRemovedVersions(before: old, after: actual)
+      else { return nil }
+      return actual.id
+    })
+    // Keep planned targets visible for verification, but omit incidental cleanup from results.
+    let plannedIDs = Set(plan.packages.map(\.id))
+    items.removeAll { cleanupOnlyIDs.contains($0.id) && !plannedIDs.contains($0.id) }
     var identities = Set<String>()
     items = items.filter { identities.insert($0.id).inserted }
     for p in after where !items.contains(where: { $0.id == p.id }) {
       let old = before.first(where: { $0.id == p.id })
-      if let old, Self.onlyRemovedVersions(before: old, after: p) { continue }
+      if cleanupOnlyIDs.contains(p.id) { continue }
       if old == nil || old!.current != p.current || old!.receipt != p.receipt {
         items.append(
           UpgradePackage(
@@ -478,7 +487,7 @@ final class Upgrade {
       let expected = p.next.isEmpty ? actual?.current.last ?? "" : p.next
       r["availableVersion"] = expected
       let verified =
-        actual?.current.contains(expected) == true
+        !cleanupOnlyIDs.contains(p.id) && actual?.current.contains(expected) == true
         && (p.current != actual!.current || p.receipt != actual!.receipt)
       let outcome: String
       let message: String
