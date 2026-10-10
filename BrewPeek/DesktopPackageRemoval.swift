@@ -245,6 +245,7 @@ extension DesktopApp {
   }
 
   func discardSavedCleanup(id: String, requestID: String) {
+    lastWebOperationKind = "cleanup-discard"
     auxiliaryBusy = true
     updateRequestID = requestID
     let destination = output
@@ -263,7 +264,8 @@ extension DesktopApp {
           self.auxiliaryBusy = false
           self.updateRequestID = nil
           self.sendUpdate([
-            "kind": "error", "message": error.localizedDescription, "requestID": requestID,
+            "kind": "error", "operation": "cleanup-discard",
+            "message": error.localizedDescription, "requestID": requestID,
           ])
         }
       }
