@@ -319,6 +319,23 @@ final class Upgrade {
       excluded: selected.filter { p in !actionable.contains(where: { $0.id == p.id }) }.map(\.name))
   }
 
+  /// Removing old kegs changes the aggregate receipt, but does not install anything new.
+  private static func onlyRemovedVersions(
+    before: UpgradePackage, after: UpgradePackage
+  ) -> Bool {
+    guard before.type == "formula", after.type == "formula",
+      before.current.count > after.current.count, !after.current.isEmpty
+    else { return false }
+    let oldTimes = before.receipt.components(separatedBy: ",")
+    let newTimes = after.receipt.components(separatedBy: ",")
+    guard oldTimes.count == before.current.count, newTimes.count == after.current.count
+    else { return false }
+    let oldReceipts = Array(zip(before.current, oldTimes))
+    return zip(after.current, newTimes).allSatisfy { version, time in
+      oldReceipts.contains { $0.0 == version && $0.1 == time }
+    }
+  }
+
   func execute(_ plan: UpgradePlan, event: @escaping (Record) -> Void) throws -> Record {
     let before = try installed()
     var items = plan.packages
@@ -445,6 +462,7 @@ final class Upgrade {
     items = items.filter { identities.insert($0.id).inserted }
     for p in after where !items.contains(where: { $0.id == p.id }) {
       let old = before.first(where: { $0.id == p.id })
+      if let old, Self.onlyRemovedVersions(before: old, after: p) { continue }
       if old == nil || old!.current != p.current || old!.receipt != p.receipt {
         items.append(
           UpgradePackage(
