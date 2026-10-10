@@ -1,5 +1,10 @@
 import Foundation
 
+struct InstallationReceipt: Hashable {
+  let version: String
+  let installedAt: String
+}
+
 struct UpgradePackage {
   let name: String
   let fullName: String
@@ -11,6 +16,14 @@ struct UpgradePackage {
   var reason: String
   var dependencies: [String] = []
   var relationship: String = ""
+  // Native comparison data; the legacy receipt string remains compatible with saved removals.
+  var installationReceipts: [InstallationReceipt]? = nil
+  func hasSameInstallation(as other: UpgradePackage) -> Bool {
+    if let receipts = installationReceipts, let otherReceipts = other.installationReceipts {
+      return receipts.count == otherReceipts.count && Set(receipts) == Set(otherReceipts)
+    }
+    return current == other.current && receipt == other.receipt
+  }
   var id: String { type + ":" + fullName }
   var argument: String {
     fullName.contains("/")
@@ -108,7 +121,11 @@ final class Upgrade {
           next: stable + (revision > 0 ? "_\(revision)" : ""),
           receipt: installed.map { String(describing: $0["time"] ?? "") }.joined(separator: ","),
           apps: [], reason: "Dependency",
-          dependencies: dependencies.map { relationshipID($0, type: "formula") }))
+          dependencies: dependencies.map { relationshipID($0, type: "formula") },
+          installationReceipts: zip(item.versions, installed).map { version, receipt in
+            InstallationReceipt(version: version,
+              installedAt: String(describing: receipt["time"] ?? ""))
+          }))
     }
     for item in info.casks {
       let c = item.raw
@@ -122,7 +139,10 @@ final class Upgrade {
           name: item.name, fullName: item.fullName, type: "cask", current: item.versions,
           next: c["version"] as? String ?? "",
           receipt: String(describing: c["installed_time"] ?? ""), apps: apps, reason: "Dependency",
-          dependencies: dependencyIDs))
+          dependencies: dependencyIDs,
+          installationReceipts: item.versions.map {
+            InstallationReceipt(version: $0, installedAt: String(describing: c["installed_time"] ?? ""))
+          }))
     }
     return result
   }
@@ -319,8 +339,23 @@ final class Upgrade {
       excluded: selected.filter { p in !actionable.contains(where: { $0.id == p.id }) }.map(\.name))
   }
 
+  /// Removing old kegs changes the aggregate receipt, but does not install anything new.
+  private static func onlyRemovedVersions(
+    before: UpgradePackage, after: UpgradePackage
+  ) -> Bool {
+    guard before.type == "formula", after.type == "formula",
+      before.current.count > after.current.count, !after.current.isEmpty
+    else { return false }
+    guard let oldReceipts = before.installationReceipts,
+      let newReceipts = after.installationReceipts,
+      oldReceipts.count == before.current.count, newReceipts.count == after.current.count
+    else { return false }
+    return Set(newReceipts).isSubset(of: Set(oldReceipts))
+  }
+
   func execute(_ plan: UpgradePlan, event: @escaping (Record) -> Void) throws -> Record {
     let before = try installed()
+    let beforeByID = Dictionary(uniqueKeysWithValues: before.map { ($0.id, $0) })
     var items = plan.packages
     var states = Dictionary(uniqueKeysWithValues: items.map { ($0.id, "Waiting for Homebrew") })
     var sentStates = states
@@ -374,7 +409,8 @@ final class Upgrade {
             let item = UpgradePackage(
               name: name, fullName: old?.fullName ?? name, type: "formula",
               current: old?.current ?? [], next: "", receipt: old?.receipt ?? "", apps: [],
-              reason: "Detected during execution", dependencies: old?.dependencies ?? [])
+              reason: "Detected during execution", dependencies: old?.dependencies ?? [],
+              installationReceipts: old?.installationReceipts)
             items.append(item)
             packagesChanged = true
             states[item.id] = "Waiting for Homebrew"
@@ -432,6 +468,7 @@ final class Upgrade {
         "commandWarning": commandWarning,
       ]
     }
+    let afterByID = Dictionary(uniqueKeysWithValues: after.map { ($0.id, $0) })
     items = items.map { p in
       guard p.next.isEmpty else { return p }
       let matches = after.filter { $0.type == p.type && ($0.id == p.id || $0.name == p.name) }
@@ -439,29 +476,41 @@ final class Upgrade {
       return UpgradePackage(
         name: actual.name, fullName: actual.fullName, type: actual.type, current: p.current,
         next: actual.current.last ?? "", receipt: p.receipt, apps: actual.apps, reason: p.reason,
-        dependencies: actual.dependencies, relationship: p.relationship)
+        dependencies: actual.dependencies, relationship: p.relationship,
+        installationReceipts: p.installationReceipts)
     }
+    let cleanupOnlyIDs = Set(after.compactMap { actual -> String? in
+      guard let old = beforeByID[actual.id],
+        Self.onlyRemovedVersions(before: old, after: actual)
+      else { return nil }
+      return actual.id
+    })
+    // Keep planned targets visible for verification, but omit incidental cleanup from results.
+    let plannedIDs = Set(plan.packages.map(\.id))
+    items.removeAll { cleanupOnlyIDs.contains($0.id) && !plannedIDs.contains($0.id) }
     var identities = Set<String>()
     items = items.filter { identities.insert($0.id).inserted }
     for p in after where !items.contains(where: { $0.id == p.id }) {
-      let old = before.first(where: { $0.id == p.id })
-      if old == nil || old!.current != p.current || old!.receipt != p.receipt {
+      let old = beforeByID[p.id]
+      if cleanupOnlyIDs.contains(p.id) { continue }
+      if old == nil || !old!.hasSameInstallation(as: p) {
         items.append(
           UpgradePackage(
             name: p.name, fullName: p.fullName, type: p.type, current: old?.current ?? [],
             next: p.current.last ?? p.next, receipt: old?.receipt ?? "", apps: p.apps,
-            reason: "Detected during execution", dependencies: p.dependencies))
+            reason: "Detected during execution", dependencies: p.dependencies,
+            installationReceipts: old?.installationReceipts))
       }
     }
     items = Self.explainRelationships(items)
     let records: [Record] = items.map { p in
       var r = p.record
-      let actual = after.first { $0.id == p.id }
+      let actual = afterByID[p.id]
       let expected = p.next.isEmpty ? actual?.current.last ?? "" : p.next
       r["availableVersion"] = expected
       let verified =
-        actual?.current.contains(expected) == true
-        && (p.current != actual!.current || p.receipt != actual!.receipt)
+        !cleanupOnlyIDs.contains(p.id) && actual?.current.contains(expected) == true
+        && !p.hasSameInstallation(as: actual!)
       let outcome: String
       let message: String
       if verified {
