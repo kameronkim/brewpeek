@@ -138,6 +138,25 @@ enum InventorySizes {
     var links = Set<FileID>()
     init(_ path: String) { self.path = path }
   }
+  /// Sorted descendants follow their ancestors. Pop completed branches instead of
+  /// checking every directory against every target; retain fallback walks for symlinks.
+  private static func measurementOrder(
+    targets: Set<String>, directories: Set<String>
+  ) -> [String] {
+    let ordered = targets.sorted()
+    var ancestors: [String] = []
+    var roots: [String] = []
+    for path in ordered {
+      while let parent = ancestors.last, !contains(parent, path) { ancestors.removeLast() }
+      // A trailing slash can cover itself under the existing prefix policy.
+      if ancestors.isEmpty && !(directories.contains(path) && contains(path, path)) {
+        roots.append(path)
+      }
+      if directories.contains(path) { ancestors.append(path) }
+    }
+    return roots + ordered
+  }
+
   /// Read each overlapping tree once, keeping an independent hard-link count for each target.
   static func measure(_ paths: [String], checkCancellation: () throws -> Void) throws -> [String:
     Int]
@@ -148,9 +167,7 @@ enum InventorySizes {
       return lstat(path, &info) == 0 && info.st_mode & S_IFMT == S_IFDIR
     }
     // Unreached targets (for example, below a symlink) get their own physical walk.
-    let roots =
-      targets.filter { path in !directories.contains { contains($0, path) } }.sorted()
-      + targets.sorted()
+    let roots = measurementOrder(targets: targets, directories: directories)
     var result: [String: Int] = [:]
     var visitedTargets = Set<String>()
     for root in roots {
