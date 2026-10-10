@@ -338,6 +338,7 @@ final class Upgrade {
 
   func execute(_ plan: UpgradePlan, event: @escaping (Record) -> Void) throws -> Record {
     let before = try installed()
+    let beforeByID = Dictionary(uniqueKeysWithValues: before.map { ($0.id, $0) })
     var items = plan.packages
     var states = Dictionary(uniqueKeysWithValues: items.map { ($0.id, "Waiting for Homebrew") })
     var sentStates = states
@@ -449,6 +450,7 @@ final class Upgrade {
         "commandWarning": commandWarning,
       ]
     }
+    let afterByID = Dictionary(uniqueKeysWithValues: after.map { ($0.id, $0) })
     items = items.map { p in
       guard p.next.isEmpty else { return p }
       let matches = after.filter { $0.type == p.type && ($0.id == p.id || $0.name == p.name) }
@@ -459,7 +461,7 @@ final class Upgrade {
         dependencies: actual.dependencies, relationship: p.relationship)
     }
     let cleanupOnlyIDs = Set(after.compactMap { actual -> String? in
-      guard let old = before.first(where: { $0.id == actual.id }),
+      guard let old = beforeByID[actual.id],
         Self.onlyRemovedVersions(before: old, after: actual)
       else { return nil }
       return actual.id
@@ -470,7 +472,7 @@ final class Upgrade {
     var identities = Set<String>()
     items = items.filter { identities.insert($0.id).inserted }
     for p in after where !items.contains(where: { $0.id == p.id }) {
-      let old = before.first(where: { $0.id == p.id })
+      let old = beforeByID[p.id]
       if cleanupOnlyIDs.contains(p.id) { continue }
       if old == nil || old!.current != p.current || old!.receipt != p.receipt {
         items.append(
@@ -483,7 +485,7 @@ final class Upgrade {
     items = Self.explainRelationships(items)
     let records: [Record] = items.map { p in
       var r = p.record
-      let actual = after.first { $0.id == p.id }
+      let actual = afterByID[p.id]
       let expected = p.next.isEmpty ? actual?.current.last ?? "" : p.next
       r["availableVersion"] = expected
       let verified =
