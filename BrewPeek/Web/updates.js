@@ -509,7 +509,6 @@ window.receiveUpdate = function (event) {
       restoreInventoryView(view);
       syncActionAvailability();
       finishNotice();
-      if (!result.recovered) scrollOperationIntoView();
       break;
     }
     case 'error':
