@@ -9,7 +9,7 @@ final class BrewProcess {
     var env = ProcessInfo.processInfo.environment
     for name in [
       "HOMEBREW_NO_AUTO_UPDATE", "HOMEBREW_NO_API_AUTO_UPDATE", "HOMEBREW_NO_ANALYTICS",
-      "HOMEBREW_NO_INSTALL_CLEANUP", "HOMEBREW_NO_ASK", "HOMEBREW_NO_UPGRADE_QUIT_CASKS",
+      "HOMEBREW_NO_ASK", "HOMEBREW_NO_UPGRADE_QUIT_CASKS",
     ] { env[name] = "1" }
     env["HOMEBREW_DOWNLOAD_CONCURRENCY"] = "auto"
     env["SUDO_ASKPASS"] = "/usr/bin/false"
