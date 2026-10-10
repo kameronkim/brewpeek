@@ -57,6 +57,20 @@ enum InventorySizes {
   private static func contains(_ parent: String, _ child: String) -> Bool {
     child.hasPrefix(parent.hasSuffix("/") ? parent : parent + "/")
   }
+  /// Descendants form a contiguous prefix range in the sorted paths.
+  /// Keep the slash boundary so e.g. /pkg does not include /pkg-extra.
+  private static func members(of path: String, in paths: [String]) -> ArraySlice<String> {
+    let prefix = path.hasSuffix("/") ? path : path + "/"
+    var lower = 0
+    var upper = paths.count
+    while lower < upper {
+      let middle = lower + (upper - lower) / 2
+      if paths[middle] < prefix { lower = middle + 1 } else { upper = middle }
+    }
+    var end = lower
+    while end < paths.count && paths[end].hasPrefix(prefix) { end += 1 }
+    return paths[lower..<end]
+  }
   static func collect(
     _ requests: [InventorySizeRequest], previous: Record?, now: Date = Date(),
     measure: ([String]) throws -> [String: Int]
@@ -74,8 +88,9 @@ enum InventorySizes {
     var pending: [String] = []
     var entries: Record = [:]
     var values: [String: Int] = [:]
-    for path in inputs.keys.sorted() {
-      let members = inputs.keys.filter { contains(path, $0) }
+    let paths = inputs.keys.sorted()
+    for path in paths {
+      let members = Self.members(of: path, in: paths)
       if let stamp = own[path], members.allSatisfy({ own[$0] != nil }) {
         signatures[path] = digest([
           "self": stamp,
