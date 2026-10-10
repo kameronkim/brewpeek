@@ -16,6 +16,15 @@ enum PackageOperationPlan {
   case uninstall(PackageRemovalPlan)
   case cleanup(CleanupPlan)
   case versions(VersionCleanupPlan)
+
+  var record: Record {
+    switch self {
+    case .update(let plan): return plan.record
+    case .uninstall(let plan): return plan.record
+    case .cleanup(let plan): return plan.record
+    case .versions(let plan): return plan.record
+    }
+  }
 }
 
 final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
@@ -35,7 +44,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   // Inventory refresh, recovery inspection and app removal have separate lifetimes.
   var auxiliaryBusy = false
   var operationPhase: PackageOperationPhase = .idle
-  var busy: Bool { auxiliaryBusy || operationPhase != .idle }
+  var busy: Bool { auxiliaryBusy || restoringWebState || operationPhase != .idle }
   var updateInProgress: Bool { operationPhase.isExecuting }
   var updateRequestID: String?
   var cancelledPreparationRequestID: String?
@@ -44,6 +53,13 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   var operationPlan: PackageOperationPlan?
   var hasOperationPlan: Bool { operationPlan != nil }
   var recoveryChecked = false
+  var recoveringWebContent = false
+  var webRecoveryLoading = false
+  var webRecoveryEvent: Record?
+  var lastOperationResult: Record?
+  var restoringWebState = false
+  var lastWebOperationKind = "update"
+  var webRecoveryKeys: [String] = []
   var output: URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("BrewPeek", isDirectory: true)
@@ -217,6 +233,11 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     auxiliaryBusy = false
     inventoryRefreshState = error == nil ? "idle" : "failed"
     refreshButton.isEnabled = true
+    if recoveringWebContent {
+      reloadTerminatedWebContentIfReady()
+      if let error { showError(error.localizedDescription) }
+      return
+    }
     if let error {
       showLoadingFailure(useSavedData: true)
       sendRefreshState()
@@ -273,6 +294,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
               self.loadingSpinner.stopAnimation(nil)
               self.loading.isHidden = true
               self.web.isHidden = false
+              self.restoreWebOperationState()
               self.restorePendingRemoval()
             }
           }
@@ -286,6 +308,21 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     }
   }
   func showLoadingFailure(useSavedData: Bool = false) {
+    if recoveringWebContent {
+      // The native worker still owns its request until it finishes.
+      guard !auxiliaryBusy, operationPhase == .idle else { return }
+      reportLoadID = nil
+      restoringWebState = false
+      recoveringWebContent = false
+      webRecoveryLoading = false
+      webRecoveryEvent = nil
+      operationPlan = nil
+      updateRequestID = nil
+      pageReady = false
+      hasDisplayedData = false
+      web.isHidden = true
+      loading.isHidden = false
+    }
     loadingSpinner.stopAnimation(nil)
     if hasDisplayedData {
       loading.isHidden = true

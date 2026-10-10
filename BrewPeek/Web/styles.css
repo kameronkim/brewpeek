@@ -942,12 +942,6 @@ mark {
   background: var(--surface);
   padding: 20px 22px;
 }
-.operation-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-}
 .eyebrow {
   font: 10px var(--mono);
   letter-spacing: 0.12em;
@@ -1038,10 +1032,6 @@ dialog p {
   height: 78px;
 }
 @media (max-width: 620px) {
-  .operation-top {
-    align-items: flex-start;
-    flex-direction: column;
-  }
   .filter-actions {
     flex-wrap: wrap;
   }
@@ -1061,14 +1051,6 @@ dialog p {
   }
 }
 
-.progress-summary {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 22px 0 9px;
-  font: 11px var(--mono);
-  color: var(--secondary);
-}
 .progress-track {
   height: 3px;
   background: #30322c;
@@ -1599,12 +1581,13 @@ html,
   margin-top: 0;
   border-top: 0;
 }
-#operation-summary:not([hidden]) + #operation .operation-top p {
-  margin-top: 0;
-}
 @media (max-width: 700px) {
   #operation-summary {padding: 10px 16px; gap: 12px;}
   .operation-summary-actions {gap: 8px;}
   .operation-summary-count {display: none;}
   #operation-view {min-width: auto;}
+}
+
+#operation-summary:not([hidden]) + #operation .operation > p:first-child {
+  margin-top: 0;
 }

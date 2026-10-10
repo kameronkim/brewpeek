@@ -49,3 +49,6 @@
 "Uninstalling: %@" = "Uninstalling: %@";
 "Updating: %@" = "Updating: %@";
 "Authentication was not accepted. Please try again." = "Authentication was not accepted. Please try again.";
+
+"Waiting for Homebrew to finish…" = "Waiting for Homebrew to finish…";
+"Restoring BrewPeek…" = "Restoring BrewPeek…";

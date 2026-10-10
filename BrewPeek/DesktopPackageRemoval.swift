@@ -2,32 +2,13 @@ import Cocoa
 
 extension DesktopApp {
   func preparePackageRemoval(key: String, requestID: String) {
-    let control = beginPackagePreparation(requestID: requestID, operation: "uninstall")
-    let destination = output
-    DispatchQueue.global(qos: .userInitiated).async {
-      do {
-        let removal = PackageRemoval(brew: try Inventory.locateBrew())
-        let plan = try Upgrade.withLock(at: destination) {
-          if let task = try RemovalTaskStore.load(at: destination), task.root.package.id != key {
-            throw InventoryError(
-              message: "Finish or discard the saved cleanup task before starting another uninstall."
-            )
-          }
-          return try removal.prepare(key: key, control: control)
-        }
-        DispatchQueue.main.async {
-          guard self.finishPreparation(requestID) else { return }
-          self.operationPlan = .uninstall(plan)
-          self.sendUpdate(["kind": "plan", "plan": plan.record, "requestID": requestID])
-        }
-      } catch {
-        DispatchQueue.main.async {
-          guard self.finishPreparation(requestID) else { return }
-          self.sendUpdate([
-            "kind": "error", "message": error.localizedDescription, "requestID": requestID,
-          ])
-        }
+    preparePackagePlan(requestID: requestID, operation: "uninstall") { control, destination in
+      if let task = try RemovalTaskStore.load(at: destination), task.root.package.id != key {
+        throw InventoryError(
+          message: "Finish or discard the saved cleanup task before starting another uninstall.")
       }
+      return .uninstall(
+        try PackageRemoval(brew: Inventory.locateBrew()).prepare(key: key, control: control))
     }
   }
 
@@ -47,18 +28,10 @@ extension DesktopApp {
           }
           let fresh = try removal.prepare(key: plan.package.id, control: control)
           let shouldStart = DispatchQueue.main.sync { () -> Bool in
-            guard self.isCurrentPreparation(requestID) else {
-              _ = self.finishPreparation(requestID)
-              return false
-            }
-            guard fresh.fingerprint == plan.fingerprint else {
-              guard self.finishPreparation(requestID) else { return false }
-              self.operationPlan = .uninstall(fresh)
-              self.sendUpdate([
-                "kind": "plan", "plan": fresh.record, "changed": true, "requestID": requestID,
-              ])
-              return false
-            }
+            guard self.acceptRecheckedPlan(
+              .uninstall(fresh), unchanged: fresh.fingerprint == plan.fingerprint,
+              requestID: requestID
+            ) else { return false }
             let active = self.runningApps(for: [fresh.package])
             guard active.isEmpty else {
               guard self.finishPreparation(requestID) else { return false }
@@ -69,10 +42,7 @@ extension DesktopApp {
               ])
               return false
             }
-            self.operationPhase = .running
-            self.preparationControl = nil
-            self.sendUpdate(["kind": "started", "plan": fresh.record, "requestID": requestID])
-            return true
+            return self.beginPackageExecution(record: fresh.record, requestID: requestID)
           }
           guard shouldStart else { return }
           let task = RemovalTask(fresh)
@@ -155,31 +125,12 @@ extension DesktopApp {
   }
 
   func prepareSavedCleanup(id: String, requestID: String) {
-    let control = beginPackagePreparation(requestID: requestID, operation: "cleanup")
-    let destination = output
-    DispatchQueue.global(qos: .userInitiated).async {
-      do {
-        let plan = try Upgrade.withLock(at: destination) {
-          guard let task = try RemovalTaskStore.load(at: destination), task.id == id else {
-            throw InventoryError(
-              message: "The saved cleanup task changed. Refresh before retrying.")
-          }
-          return try PackageRemoval(brew: Inventory.locateBrew()).prepareCleanup(
-            task, control: control)
-        }
-        DispatchQueue.main.async {
-          guard self.finishPreparation(requestID) else { return }
-          self.operationPlan = .cleanup(plan)
-          self.sendUpdate(["kind": "plan", "plan": plan.record, "requestID": requestID])
-        }
-      } catch {
-        DispatchQueue.main.async {
-          guard self.finishPreparation(requestID) else { return }
-          self.sendUpdate([
-            "kind": "error", "message": error.localizedDescription, "requestID": requestID,
-          ])
-        }
+    preparePackagePlan(requestID: requestID, operation: "cleanup") { control, destination in
+      guard let task = try RemovalTaskStore.load(at: destination), task.id == id else {
+        throw InventoryError(message: "The saved cleanup task changed. Refresh before retrying.")
       }
+      return .cleanup(
+        try PackageRemoval(brew: Inventory.locateBrew()).prepareCleanup(task, control: control))
     }
   }
 
@@ -198,22 +149,11 @@ extension DesktopApp {
           }
           let fresh = try removal.prepareCleanup(task, control: control)
           let shouldStart = DispatchQueue.main.sync { () -> Bool in
-            guard self.isCurrentPreparation(requestID) else {
-              _ = self.finishPreparation(requestID)
-              return false
-            }
-            guard fresh.fingerprint == plan.fingerprint else {
-              guard self.finishPreparation(requestID) else { return false }
-              self.operationPlan = .cleanup(fresh)
-              self.sendUpdate([
-                "kind": "plan", "plan": fresh.record, "changed": true, "requestID": requestID,
-              ])
-              return false
-            }
-            self.operationPhase = .running
-            self.preparationControl = nil
-            self.sendUpdate(["kind": "started", "plan": fresh.record, "requestID": requestID])
-            return true
+            guard self.acceptRecheckedPlan(
+              .cleanup(fresh), unchanged: fresh.fingerprint == plan.fingerprint,
+              requestID: requestID
+            ) else { return false }
+            return self.beginPackageExecution(record: fresh.record, requestID: requestID)
           }
           guard shouldStart else { return }
           var result = try removal.executeCleanup(fresh) { event in
@@ -245,6 +185,7 @@ extension DesktopApp {
   }
 
   func discardSavedCleanup(id: String, requestID: String) {
+    lastWebOperationKind = "cleanup-discard"
     auxiliaryBusy = true
     updateRequestID = requestID
     let destination = output
@@ -263,7 +204,8 @@ extension DesktopApp {
           self.auxiliaryBusy = false
           self.updateRequestID = nil
           self.sendUpdate([
-            "kind": "error", "message": error.localizedDescription, "requestID": requestID,
+            "kind": "error", "operation": "cleanup-discard",
+            "message": error.localizedDescription, "requestID": requestID,
           ])
         }
       }
