@@ -117,12 +117,7 @@ extension DesktopApp {
     updateRequestID = requestID
     let active = runningApps(for: plan.packages)
     guard active.isEmpty else {
-      operationPlan = nil
-      sendUpdate([
-        "kind": "error", "runningApps": Array(Set(active)).sorted(),
-        "message": "Close these apps before updating, then retry: "
-          + active.joined(separator: ", "), "requestID": requestID,
-      ])
+      reportRunningUpdateApps(active, plan: plan, requestID: requestID)
       return
     }
     let control = beginPackagePreparation(
@@ -179,14 +174,20 @@ extension DesktopApp {
     let active = runningApps(for: plan.packages)
     guard active.isEmpty else {
       guard finishPreparation(requestID) else { return false }
-      sendUpdate([
-        "kind": "error", "runningApps": active, "requestID": requestID,
-        "message": "Close these apps before updating, then retry: "
-          + active.joined(separator: ", "),
-      ])
+      reportRunningUpdateApps(active, plan: plan, requestID: requestID)
       return false
     }
     return beginPackageExecution(record: plan.record, requestID: requestID)
+  }
+
+  /// Retain the approved plan so Retry rechecks it instead of requesting approval again.
+  private func reportRunningUpdateApps(_ names: [String], plan: UpgradePlan, requestID: String) {
+    operationPlan = .update(plan)
+    sendUpdate([
+      "kind": "error", "runningApps": names, "retryUpdateToken": plan.token,
+      "message": "Close these apps before updating, then retry: " + names.joined(separator: ", "),
+      "requestID": requestID,
+    ])
   }
 
   /// Runs on the main queue, including the final cancellation gate before mutation.

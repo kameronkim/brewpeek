@@ -4,6 +4,7 @@ let updateMode = 'ready',
   requestedKeys = [],
   previousResult = null;
 let activeRequest = null;
+let retryUpdateToken = null;
 let operationKind = 'update';
 let cleanupTaskID = null;
 let processedPackages = 0;
@@ -169,6 +170,7 @@ $('notice').addEventListener('close', () => {
 function checkChanges(keys, trigger = document.activeElement, operation = 'update') {
   if (updateBusy() || inventoryRefreshState !== 'idle' || !keys.length) return;
   if (!popupScroll) popupReturnFocus = captureInventoryFocus(trigger);
+  retryUpdateToken = null;
   operationKind = operation;
   requestedKeys = keys;
   activeRequest = crypto.randomUUID();
@@ -204,7 +206,8 @@ function showChecking(message) {
   setConfirmState('checking');
   $('confirm-title').focus({ preventScroll: true });
 }
-function showCheckError(message, runningApps = []) {
+function showCheckError(message, runningApps = [], token = null) {
+  retryUpdateToken = operationKind === 'update' ? token : null;
   updatePlan = null;
   setUpdateMode('check-failed');
   setConfirmState('check-failed');
@@ -222,12 +225,20 @@ function showCheckError(message, runningApps = []) {
   $('retry-plan').focus({ preventScroll: true });
 }
 function retryOperation(trigger) {
-  if (operationKind === 'cleanup-discard') confirmDiscardCleanup(trigger);
+  if (operationKind === 'update' && retryUpdateToken) {
+    if (updateBusy() || inventoryRefreshState !== 'idle') return;
+    const token = retryUpdateToken;
+    retryUpdateToken = null;
+    activeRequest = crypto.randomUUID();
+    showChecking('Rechecking the confirmed plan…');
+    postUpdate({ action: 'start', token, requestID: activeRequest });
+  } else if (operationKind === 'cleanup-discard') confirmDiscardCleanup(trigger);
   else if (operationKind === 'cleanup') checkCleanup(trigger);
   else checkChanges(requestedKeys, trigger, operationKind);
 }
 $('retry-plan').onclick = () => retryOperation($('retry-plan'));
 function showPlan(plan, changed) {
+  retryUpdateToken = null;
   updatePlan = plan;
   operationKind = plan.operation || 'update';
   setUpdateMode('confirming');
@@ -278,6 +289,7 @@ function showPlan(plan, changed) {
   document.querySelector('.confirm-scroll').scrollTop = 0;
 }
 function cancelUpdate() {
+  retryUpdateToken = null;
   if (updateMode === 'discarding') return false;
   const pending = updateMode === 'checking';
   updatePlan = null;
@@ -520,11 +532,13 @@ window.receiveUpdate = function (event) {
       showPlan(event.plan, event.changed);
       break;
     case 'cancelled':
+      retryUpdateToken = null;
       activeRequest = null;
       setUpdateMode(previousResult ? 'result' : 'ready');
       restoreCancelledFocus();
       break;
     case 'started':
+      retryUpdateToken = null;
       $('confirm').close();
       updatePlan = null;
       beginProgress(event.plan);
@@ -569,7 +583,7 @@ window.receiveUpdate = function (event) {
     case 'error':
       clearProgressData();
       if (['checking', 'discarding', 'confirming', 'check-failed'].includes(updateMode)) {
-        showCheckError(event.message, event.runningApps);
+        showCheckError(event.message, event.runningApps, event.retryUpdateToken);
         break;
       }
       updatePlan = null;
