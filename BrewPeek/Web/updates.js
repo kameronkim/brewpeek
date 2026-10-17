@@ -179,6 +179,7 @@ function checkChanges(keys, trigger = document.activeElement, operation = 'updat
 }
 function setConfirmState(mode) {
   delete $('confirm').dataset.issue;
+  $('quit-update-apps').hidden = true;
   $('confirm').dataset.operation = operationKind;
   document.querySelector('.confirm-heading .eyebrow').textContent = operationKind === 'version-cleanup' ? 'VERSION CLEANUP' : operationKind.startsWith('cleanup') ? 'DEPENDENCY CLEANUP' : operationKind === 'uninstall' ? 'PACKAGE UNINSTALL' : 'PACKAGE UPDATE';
   $('start').disabled = false;
@@ -213,6 +214,9 @@ function showCheckError(message, runningApps = [], token = null) {
   setConfirmState('check-failed');
   if (runningApps.length) {
     $('confirm').dataset.issue = 'running-apps';
+    $('quit-update-apps').hidden = !retryUpdateToken;
+    $('quit-update-apps').disabled = false;
+    $('quit-update-apps').textContent = runningApps.length === 1 ? 'Quit app' : 'Quit apps';
     $('confirm-title').textContent = 'Close apps to continue';
     $('confirm-copy').textContent = `Quit the apps below, then retry the ${operationKind === 'uninstall' ? 'uninstall' : 'update'}.`;
     $('confirm-error').innerHTML =
@@ -236,6 +240,11 @@ function retryOperation(trigger) {
   else if (operationKind === 'cleanup') checkCleanup(trigger);
   else checkChanges(requestedKeys, trigger, operationKind);
 }
+$('quit-update-apps').onclick = () => {
+  if (updateMode !== 'check-failed' || !retryUpdateToken) return;
+  $('quit-update-apps').disabled = true;
+  postUpdate({ action: 'quitUpdateApps', token: retryUpdateToken, requestID: activeRequest });
+};
 $('retry-plan').onclick = () => retryOperation($('retry-plan'));
 function showPlan(plan, changed) {
   retryUpdateToken = null;
@@ -580,6 +589,12 @@ window.receiveUpdate = function (event) {
       finishNotice();
       break;
     }
+    case 'appQuitRequested':
+      if (updateMode === 'check-failed' && retryUpdateToken) {
+        $('confirm-copy').textContent = event.message;
+        $('quit-update-apps').disabled = true;
+      }
+      break;
     case 'error':
       clearProgressData();
       if (['checking', 'discarding', 'confirming', 'check-failed'].includes(updateMode)) {

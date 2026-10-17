@@ -50,6 +50,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   var cancelledPreparationRequestID: String?
   var updatePreparing: Bool { operationPhase.isPreparing }
   var preparationControl: UpgradePreparation?
+  var blockedUpdateToken: String?
   var operationPlan: PackageOperationPlan?
   var hasOperationPlan: Bool { operationPlan != nil }
   var recoveryChecked = false
