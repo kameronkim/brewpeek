@@ -8,13 +8,17 @@ extension DesktopApp {
       reloadTerminatedWebContentIfReady()
       return
     }
-    guard pageReady else { return }
+    guard pageReady else {
+      if let snapshot = event["snapshot"] as? Record { startSecurityRefresh(snapshot) }
+      return
+    }
     web.callAsyncJavaScript(
       "window.receiveUpdate(event)", arguments: ["event": event], in: nil, in: .page
     ) { result in
       if case .failure(let error) = result {
         NSLog("Update UI delivery failed: %@", error.localizedDescription)
       }
+      if let snapshot = event["snapshot"] as? Record { self.startSecurityRefresh(snapshot) }
     }
   }
   func handleUpdate(_ body: Any) {

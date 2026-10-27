@@ -266,7 +266,7 @@ final class Inventory {
 
   func collect(
     refreshMetadata: Bool = true, previous: Record? = nil, invalidatingSizes: Set<String> = [],
-    installedInfo: Record? = nil
+    installedInfo: Record? = nil, includeSecurity: Bool = false
   ) throws -> Record {
     let updates = checkUpdates(refreshMetadata: refreshMetadata)
     try checkCancellation()
@@ -427,10 +427,11 @@ final class Inventory {
       "cellarSize": nullable(sizes.values[cellar]),
       "caskSize": nullable(sizes.values[caskroom]),
     ]
-    let security = FormulaSecurity.check(inventory: self)
+    let security: Record = includeSecurity ? FormulaSecurity.check(inventory: self)
+      : ["status": "checking", "scope": "formulae"]
     try checkCancellation()
     return [
-      "securityCheck": security,
+      "snapshotID": UUID().uuidString, "securityCheck": security,
       "formulae": formulas, "casks": applications, "taps": taps, "environment": environment,
       "updateCheck": updates.state, "sizeCache": sizes.cache,
     ]

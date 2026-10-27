@@ -131,7 +131,7 @@ enum FormulaSecurity {
     guard let value else { return nil }
     guard let value = value as? Record,
       let state = value["status"] as? String,
-      ["succeeded", "incomplete", "unsupported", "failed"].contains(state),
+      ["checking", "succeeded", "incomplete", "unsupported", "failed"].contains(state),
       value["scope"] as? String == "formulae" else { return failure("Saved security information is invalid. Refresh to check again.") }
     if let report = value["report"] {
       guard let report = report as? Record, validReport(report) else {
