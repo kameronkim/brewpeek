@@ -3,20 +3,41 @@ import Foundation
 
 /// Homebrew 7.0.10's vulns JSON is authoritative. No CVE matching or version inference lives here.
 enum FormulaSecurity {
-  static func check(inventory: Inventory, timeout: Double = 45) -> Record {
+  final class SupportCache {
+    private struct Key: Hashable { let brew: String; let version: String }
+    private var values: [Key: Bool] = [:]
+    private let lock = NSLock()
+    func value(brew: String, version: String) -> Bool? {
+      lock.lock(); defer { lock.unlock() }
+      return values[Key(brew: brew, version: version)]
+    }
+    func save(_ value: Bool, brew: String, version: String) {
+      lock.lock(); defer { lock.unlock() }
+      values[Key(brew: brew, version: version)] = value
+    }
+  }
+
+  static func check(
+    inventory: Inventory, timeout: Double = 45, supportCache: SupportCache? = nil,
+    brewVersion: String? = nil
+  ) -> Record {
     do {
-      // Probe the JSON coverage contract, not a guessed Homebrew version or localized error alone.
-      let help = try inventory.runResult(inventory.brew, ["help", "vulns"], timeout: 10)
-      if help.exited, help.status == 0 {
-        guard help.output.contains("--json"), help.output.contains("scan coverage") else {
-          return ["status": "unsupported", "scope": "formulae"]
+      let cached = brewVersion.flatMap { supportCache?.value(brew: inventory.brew, version: $0) }
+      if cached == false { return ["status": "unsupported", "scope": "formulae"] }
+      if cached == nil {
+        let help = try inventory.runResult(inventory.brew, ["help", "vulns"], timeout: 10)
+        let supported: Bool
+        if help.exited, help.status == 0 {
+          let text = help.output.replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+          supported = text.contains("--json") && text.contains("scan coverage")
+        } else if help.exited, help.status == 1,
+          (help.error + help.output).contains("Unknown command"), (help.error + help.output).contains("vulns") {
+          supported = false
+        } else {
+          return failure("Could not check Homebrew vulnerability command support.", result: help)
         }
-      } else {
-        let unknown = help.error + help.output
-        if help.exited, help.status == 1, unknown.contains("Unknown command"), unknown.contains("vulns") {
-          return ["status": "unsupported", "scope": "formulae"]
-        }
-        return failure("Could not check Homebrew vulnerability command support.", result: help)
+        if let brewVersion { supportCache?.save(supported, brew: inventory.brew, version: brewVersion) }
+        if !supported { return ["status": "unsupported", "scope": "formulae"] }
       }
       let result = try inventory.runResult(inventory.brew, ["vulns", "--json"], timeout: timeout)
       return interpret(result)
@@ -72,15 +93,21 @@ enum FormulaSecurity {
     }
   }
 
+  static func isComplete(_ report: Record) -> Bool {
+    report["complete"] as? Bool == true
+      && (report["skipped_formulae"] as? [String])?.isEmpty == true
+      && (report["outdated_without_sbom"] as? [String])?.isEmpty == true
+      && (report["unscanned_formulae"] as? [String: String])?.isEmpty == true
+  }
+
   static func interpret(_ result: Inventory.CommandResult) -> Record {
     guard let report = (try? JSONSerialization.jsonObject(with: Data(result.output.utf8))) as? Record,
       validReport(report) else { return failure("Homebrew did not return a valid vulnerability report.", result: result) }
     let findings = report["findings"] as! [Record]
     let open = findings.contains { !($0["vulnerabilities"] as! [Record]).isEmpty }
     let stale = report["outdated_without_sbom"] as! [String]
-    let skipped = report["skipped_formulae"] as! [String]
     let unscanned = report["unscanned_formulae"] as! [String: String]
-    let complete = report["complete"] as! Bool && stale.isEmpty && skipped.isEmpty && unscanned.isEmpty
+    let complete = isComplete(report)
     // cmd/vulns.rb sets Homebrew.failed for these cases. Other exit codes are execution failures.
     let expectedFailure = open || !stale.isEmpty
       || unscanned.values.contains("untrusted_tap") || unscanned.values.contains("resolution_error")
@@ -116,10 +143,7 @@ enum FormulaSecurity {
     // Recheck coverage invariants even for a saved snapshot.
     var normalized = value
     if let report = value["report"] as? Record {
-      let complete = report["complete"] as? Bool == true
-        && (report["skipped_formulae"] as? [String])?.isEmpty == true
-        && (report["outdated_without_sbom"] as? [String])?.isEmpty == true
-        && (report["unscanned_formulae"] as? [String: String])?.isEmpty == true
+      let complete = isComplete(report)
       normalized["complete"] = complete
       if state == "succeeded" && !complete { normalized["status"] = "incomplete" }
     }
