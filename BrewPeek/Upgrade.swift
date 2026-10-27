@@ -392,7 +392,8 @@ final class Upgrade {
       } else {
         phase = nil
       }
-      if let heading = HomebrewDependencyHeading.parse(line) {
+      let heading = HomebrewDependencyHeading.parse(line)
+      if let heading {
         let names = heading.names
         for name in names {
           let dependencyID = Self.relationshipID(name, type: "formula")
@@ -429,7 +430,23 @@ final class Upgrade {
       }
       // Output is activity, not proof of success. Percentages are intentionally not inferred.
       if let phase {
-        for p in items where activityMatcher.matches(p.name, in: line) {
+        let exactIDs = heading.map { heading in
+          Set(([heading.parent] + heading.names).map { Self.relationshipID($0, type: "formula") })
+        }
+        let ambiguousNames = Set(Dictionary(grouping: items, by: \.name).filter { $0.value.count > 1 }.keys)
+        for p in items {
+          let matches: Bool
+          if let exactIDs {
+            matches = exactIDs.contains(Self.relationshipID(p.fullName, type: p.type))
+          } else if ambiguousNames.contains(p.name) {
+            // Free-form activity cannot disambiguate a bare name shared by a Tap or Cask.
+            let qualified = p.fullName.contains("/") ? p.fullName
+              : "homebrew/" + (p.type == "cask" ? "cask/" : "core/") + p.name
+            matches = activityMatcher.matches(qualified, in: line)
+          } else {
+            matches = activityMatcher.matches(p.fullName, in: line) || activityMatcher.matches(p.name, in: line)
+          }
+          guard matches else { continue }
           states[p.id] = phase
           if phase != "Downloading…" { touched.insert(p.id) }
         }
