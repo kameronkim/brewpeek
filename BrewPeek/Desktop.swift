@@ -13,6 +13,7 @@ enum PackageOperationPhase {
 
 enum PackageOperationPlan {
   case update(UpgradePlan)
+  case trust(UpgradeTrustPlan)
   case uninstall(PackageRemovalPlan)
   case cleanup(CleanupPlan)
   case versions(VersionCleanupPlan)
@@ -20,6 +21,7 @@ enum PackageOperationPlan {
   var record: Record {
     switch self {
     case .update(let plan): return plan.record
+    case .trust(let plan): return plan.record
     case .uninstall(let plan): return plan.record
     case .cleanup(let plan): return plan.record
     case .versions(let plan): return plan.record

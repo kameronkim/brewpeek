@@ -54,6 +54,10 @@ extension DesktopApp {
             ? "Quit requested. Save any open work and wait for the apps to close, then retry."
             : "Some apps could not be asked to quit. Close them manually, then retry.",
       ])
+    case "startTrust":
+      guard let token = request["token"] as? String, case let .trust(plan)? = operationPlan,
+        token == plan.token else { return }
+      startUpdateTrust(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "prepareVersions":
       guard let keys = request["keys"] as? [String], keys.count == 1 else { return }
       prepareVersionCleanup(
@@ -130,9 +134,9 @@ extension DesktopApp {
     return control
   }
 
-  private func prepareUpdate(keys: [String], requestID: String) {
+  func prepareUpdate(keys: [String], requestID: String, brew: String? = nil) {
     preparePackagePlan(requestID: requestID, operation: "update") { control, _ in
-      .update(try Upgrade(brew: Inventory.locateBrew()).prepare(keys: keys, control: control))
+      .update(try Upgrade(brew: brew ?? Inventory.locateBrew()).prepare(keys: keys, control: control))
     }
   }
 
@@ -169,10 +173,11 @@ extension DesktopApp {
             to: &result, inventory: engine.inventory, destination: destination,
             invalidatingSizes: Set((result["packages"] as? [Record] ?? []).compactMap { $0["id"] as? String }), installedInfo: engine.latestInstalledInfo)
           result["retryKeys"] = fresh.selected.map(\.id)
-          result["command"] =
-            ([engine.inventory.brew, "upgrade"] + fresh.selected.map(\.argument)).map {
+          result["command"] = try UpgradeTrust.commands(fresh.selected, preview: false).map { arguments in
+            ([engine.inventory.brew] + arguments).map {
               "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'"
             }.joined(separator: " ")
+          }.joined(separator: " && ")
           let completed = result
           DispatchQueue.main.async {
             self.finishPackageOperation(completed, requestID: requestID)
@@ -180,6 +185,10 @@ extension DesktopApp {
         }
       } catch {
         DispatchQueue.main.async {
+          if let required = error as? UpgradeTrustRequired {
+            self.publishPackagePlan(.trust(required.plan), requestID: requestID)
+            return
+          }
           guard self.finishPackageOperation([
             "kind": "error", "message": error.localizedDescription,
           ], requestID: requestID) else { return }
