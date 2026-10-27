@@ -18,6 +18,12 @@ enum HomebrewPackageName {
 
 /// Inventory collection and package operations share one nonblocking file lock.
 enum HomebrewOperationLock {
+  enum Failure: LocalizedError {
+    case busy(String)
+    var errorDescription: String? {
+      switch self { case .busy(let message): return message }
+    }
+  }
   static func withLock<T>(
     at inventory: URL, createDirectory: Bool = true,
     openError: String = "Could not open the operation lock.",
@@ -31,7 +37,8 @@ enum HomebrewOperationLock {
     guard fd >= 0 else { throw InventoryError(message: openError) }
     defer { close(fd) }
     guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
-      throw InventoryError(message: busyError)
+      if errno == EWOULDBLOCK || errno == EAGAIN { throw Failure.busy(busyError) }
+      throw InventoryError(message: openError)
     }
     defer { flock(fd, LOCK_UN) }
     return try action()

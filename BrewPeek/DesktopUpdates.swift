@@ -3,6 +3,7 @@ import WebKit
 
 extension DesktopApp {
   func sendUpdate(_ event: Record) {
+    if let snapshot = event["snapshot"] as? Record { observeSecuritySnapshot(snapshot) }
     rememberWebOperationEvent(event)
     if recoveringWebContent {
       reloadTerminatedWebContentIfReady()
@@ -251,6 +252,7 @@ extension DesktopApp {
     var completed = event
     completed["requestID"] = requestID
     sendUpdate(completed)
+    finishInterruptedSecurity(hasFreshSnapshot: completed["snapshot"] is Record)
     return true
   }
 

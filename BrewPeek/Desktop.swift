@@ -42,7 +42,9 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   var inventoryRefreshState = "idle"
   var collectingInventory: Inventory?
   var securityInventory: Inventory?
-  var securitySnapshotID: String?
+  var securityContext: SecuritySnapshotContext?
+  var securityGeneration: UUID?
+  var interruptedSecurityContext: SecuritySnapshotContext?
   var latestSecurityReport: (snapshotID: String, report: Record)?
   let securitySupportCache = FormulaSecurity.SupportCache()
   var terminating = false
@@ -282,6 +284,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
             if self.inventoryRefreshState != "refreshing" { self.showLoadingFailure() }
             return
           }
+          self.observeSecuritySnapshot(snapshot)
           self.web.isHidden = false
           self.web.callAsyncJavaScript(
             """

@@ -1,64 +1,120 @@
 import Cocoa
 import WebKit
 
+struct SecuritySnapshotContext {
+  let id: String
+  let destination: URL
+}
+
 extension DesktopApp {
   func cancelSecurityRefresh() {
     let old = securityInventory
     securityInventory = nil
-    securitySnapshotID = nil
+    securityContext = nil
+    securityGeneration = nil
+    interruptedSecurityContext = nil
     latestSecurityReport = nil
     old?.cancel()
   }
 
+  /// Record the inventory before handing it to WebKit; execution can start before its callback.
+  func observeSecuritySnapshot(_ snapshot: Record, at destination: URL? = nil) {
+    guard let id = snapshot["snapshotID"] as? String, securityContext?.id != id else { return }
+    cancelSecurityRefresh()
+    securityContext = SecuritySnapshotContext(id: id, destination: destination ?? output)
+  }
+
+  func suspendSecurityForOperation() {
+    let context = securityContext
+    cancelSecurityRefresh()
+    interruptedSecurityContext = context
+  }
+
+  /// An operation can finish without a replacement snapshot (execution or refresh failure).
+  func finishInterruptedSecurity(hasFreshSnapshot: Bool) {
+    let context = interruptedSecurityContext
+    interruptedSecurityContext = nil
+    guard !hasFreshSnapshot, let context, !terminating else { return }
+    cancelSecurityRefresh()
+    securityContext = context
+    let owner = UUID()
+    securityGeneration = owner
+    publishSecurityReport([
+      "scope": "formulae", "status": "failed",
+      "error": "The inventory could not be refreshed after the package operation. Refresh before checking security again.",
+    ], context: context, owner: owner)
+  }
+
   /// Security work owns no mutation/refresh UI state. Its only write is a guarded snapshot patch.
   func startSecurityRefresh(_ snapshot: Record, using suppliedInventory: Inventory? = nil, at suppliedDestination: URL? = nil) {
-    guard !terminating, operationPhase != .running,
-      let snapshotID = snapshot["snapshotID"] as? String else { return }
+    guard !terminating, operationPhase != .running, inventoryRefreshState != "refreshing",
+      let snapshotID = snapshot["snapshotID"] as? String,
+      securityContext?.id == snapshotID else { return }
     if let latest = latestSecurityReport, latest.snapshotID == snapshotID {
       deliverSecurityReport(latest.report, snapshotID: snapshotID)
       return
     }
     guard
       (snapshot["securityCheck"] as? Record)?["status"] as? String == "checking",
-      securitySnapshotID != snapshotID else { return }
+      !(securityContext?.id == snapshotID && securityGeneration != nil) else { return }
     cancelSecurityRefresh()
+    let context = SecuritySnapshotContext(id: snapshotID, destination: suppliedDestination ?? output)
+    securityContext = context
+    let owner = UUID()
+    securityGeneration = owner
     let inventory: Inventory
     do { inventory = try suppliedInventory ?? Inventory(brew: Inventory.locateBrew()) }
     catch {
-      let failure: Record = ["status": "failed", "scope": "formulae", "error": error.localizedDescription]
-      latestSecurityReport = (snapshotID, failure)
-      deliverSecurityReport(failure, snapshotID: snapshotID)
+      publishSecurityReport([
+        "status": "failed", "scope": "formulae", "error": error.localizedDescription,
+      ], context: context, owner: owner)
       return
     }
     securityInventory = inventory
-    securitySnapshotID = snapshotID
-    let destination = suppliedDestination ?? output
     let version = (snapshot["environment"] as? Record)?["brewVersion"] as? String
     let cache = securitySupportCache
     DispatchQueue.global(qos: .utility).async {
       let report = FormulaSecurity.check(inventory: inventory, supportCache: cache, brewVersion: version)
       DispatchQueue.main.async {
-        guard self.securityInventory === inventory, !self.terminating else { return }
-        // Save under the shared lock, off the main thread. A new task can invalidate ownership meanwhile.
-        DispatchQueue.global(qos: .utility).async {
-          let result = Result { try SecurityReportStore.update(report, snapshotID: snapshotID, at: destination) }
-          DispatchQueue.main.async {
-            guard self.securityInventory === inventory, !self.terminating else { return }
-            self.securityInventory = nil
-            switch result {
-            case .success(true):
-              self.latestSecurityReport = (snapshotID, report)
-              self.deliverSecurityReport(report, snapshotID: snapshotID)
-            case .success(false): break // Another snapshot owns the file now.
-            case .failure:
-              var failure = report
-              failure["status"] = "failed"
-              failure["error"] = "Could not save the security report. Refresh to check again."
-              self.latestSecurityReport = (snapshotID, failure)
-              self.deliverSecurityReport(failure, snapshotID: snapshotID)
+        guard self.securityGeneration == owner, !self.terminating else { return }
+        self.securityInventory = nil
+        self.publishSecurityReport(report, context: context, owner: owner)
+      }
+    }
+  }
+
+  private func publishSecurityReport(_ report: Record, context: SecuritySnapshotContext, owner: UUID) {
+    latestSecurityReport = (context.id, report)
+    deliverSecurityReport(report, snapshotID: context.id)
+    persistSecurityReport(report, context: context, owner: owner)
+  }
+
+  /// Contention is temporary, not a scan failure. Retry only persistence, until ownership changes.
+  private func persistSecurityReport(
+    _ report: Record, context: SecuritySnapshotContext, owner: UUID, retryDelay: TimeInterval = 0.1
+  ) {
+    guard securityGeneration == owner, !terminating else { return }
+    DispatchQueue.global(qos: .utility).async {
+      let result = Result { try SecurityReportStore.update(report, snapshotID: context.id, at: context.destination) }
+      DispatchQueue.main.async {
+        guard self.securityGeneration == owner, !self.terminating else { return }
+        switch result {
+        case .failure(let error):
+          if case HomebrewOperationLock.Failure.busy = error {
+            DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) {
+              self.persistSecurityReport(report, context: context, owner: owner, retryDelay: min(2, retryDelay * 2))
             }
+            return
           }
+          var failure = report
+          failure["status"] = "failed"
+          failure["error"] = "Could not save the security report. Refresh to check again."
+          self.latestSecurityReport = (context.id, failure)
+          self.deliverSecurityReport(failure, snapshotID: context.id)
+        case .success:
+          break // A mismatched/missing snapshot must not be recreated or overwritten.
         }
+        self.securityGeneration = nil
       }
     }
   }
