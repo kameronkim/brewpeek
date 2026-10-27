@@ -114,3 +114,43 @@ struct PackageActivityMatcher {
     return pattern.firstMatch(in: line, range: NSRange(line.startIndex..<line.endIndex, in: line)) != nil
   }
 }
+
+/// Progress hints only: dependency identities come from headings, never their version annotations.
+struct HomebrewDependencyHeading {
+  let parent: String
+  let names: [String]
+
+  private static let heading = try! NSRegularExpression(
+    pattern: #"^(?:==>\s*)?(?:Installing|Upgrading) (?:dependencies for ([^:]+)|([^:]+) dependency):\s*(.+)$"#)
+  private static let entry = try! NSRegularExpression(
+    pattern: #"^([A-Za-z0-9][A-Za-z0-9@+_./-]*)(?:\s+(?:\([^()\r\n]*\)|[↑✔✓]))*$"#)
+
+  static func parse(_ line: String) -> HomebrewDependencyHeading? {
+    let text = line.replacingOccurrences(
+      of: #"\x1B\[[0-?]*[ -/]*[@-~]"#, with: "", options: .regularExpression
+    ).trimmingCharacters(in: .whitespacesAndNewlines)
+    let whole = NSRange(text.startIndex..<text.endIndex, in: text)
+    guard let match = heading.firstMatch(in: text, range: whole) else { return nil }
+    func capture(_ index: Int) -> String? {
+      Range(match.range(at: index), in: text).map { String(text[$0]) }
+    }
+    guard let parent = capture(1) ?? capture(2), HomebrewPackageName.isValid(parent),
+      let body = capture(3) else { return nil }
+    let summary = capture(1) != nil
+    let entries = summary
+      ? body.replacingOccurrences(of: #",\s*(?:and\s+)?|\s+and\s+"#, with: "\n", options: .regularExpression)
+        .components(separatedBy: "\n")
+      : [body]
+    var seen = Set<String>()
+    let names = entries.compactMap { value -> String? in
+      let value = value.trimmingCharacters(in: .whitespacesAndNewlines)
+      guard let found = entry.firstMatch(in: value, range: NSRange(value.startIndex..<value.endIndex, in: value)),
+        let range = Range(found.range(at: 1), in: value) else { return nil }
+      let name = String(value[range])
+      guard HomebrewPackageName.isValid(name),
+        seen.insert(HomebrewPackageName.formulaIdentity(name)).inserted else { return nil }
+      return name
+    }
+    return names.isEmpty ? nil : HomebrewDependencyHeading(parent: parent, names: names)
+  }
+}

@@ -392,22 +392,17 @@ final class Upgrade {
       } else {
         phase = nil
       }
-      if installing,
-        let range = line.range(
-          of: #"Installing (?:.* dependency: |dependencies for [^:]+: )"#,
-          options: .regularExpression
-        )
-      {
-        let names = line[range.upperBound...].components(separatedBy: ", ").map {
-          $0.trimmingCharacters(in: .whitespacesAndNewlines)
-        }.filter(HomebrewPackageName.isValid)
+      if let heading = HomebrewDependencyHeading.parse(line) {
+        let names = heading.names
         for name in names {
-          if !items.contains(where: { $0.name == name || $0.fullName == name }) {
+          let dependencyID = Self.relationshipID(name, type: "formula")
+          if !items.contains(where: { Self.relationshipID($0.fullName, type: $0.type) == dependencyID }) {
             let old = before.first(where: {
-              $0.type == "formula" && ($0.name == name || $0.fullName == name)
+              Self.relationshipID($0.fullName, type: $0.type) == dependencyID
             })
             let item = UpgradePackage(
-              name: name, fullName: old?.fullName ?? name, type: "formula",
+              name: old?.name ?? name.split(separator: "/").last.map(String.init) ?? name,
+              fullName: old?.fullName ?? HomebrewPackageName.formulaIdentity(name), type: "formula",
               current: old?.current ?? [], next: "", receipt: old?.receipt ?? "", apps: [],
               reason: "Detected during execution", dependencies: old?.dependencies ?? [],
               installationReceipts: old?.installationReceipts)
@@ -417,13 +412,9 @@ final class Upgrade {
           }
         }
         // Homebrew can reveal a new dependency before JSON metadata includes it.
-        let heading = String(line[range])
-        let parentName =
-          heading.hasPrefix("Installing dependencies for ")
-          ? String(heading.dropFirst("Installing dependencies for ".count).dropLast(2))
-          : String(heading.dropFirst("Installing ".count).dropLast(" dependency: ".count))
+        let parentID = Self.relationshipID(heading.parent, type: "formula")
         let parents = items.indices.filter {
-          items[$0].fullName == parentName || items[$0].name == parentName
+          Self.relationshipID(items[$0].fullName, type: items[$0].type) == parentID
         }
         if parents.count == 1, let parent = parents.first {
           for name in names {
