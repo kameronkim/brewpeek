@@ -101,6 +101,7 @@ function securityDetail(p) {
   const id = formulaIdentity(key(p).slice(8));
   const includes = names => (names || []).some(name => formulaIdentity(name) === id);
   let notes = [];
+  if (check.status === 'checking') notes.push('Checking Formula security information…');
   if (check.status === 'unsupported') notes.push('This Homebrew does not support vulnerability scan coverage JSON.');
   if (check.status === 'failed') notes.push('Security check failed. Any retained findings are unconfirmed.');
   else if (check.complete === false) notes.push('Scan incomplete. Findings do not cover every installed Formula.');
@@ -128,7 +129,8 @@ function renderSecurityNote() {
   const open = findings.filter(f => f.vulnerabilities?.length).length;
   const patched = findings.filter(f => f.patched?.length).length;
   let text = `Security · ${open} Formulae with open findings · ${patched} with findings resolved by Formula patches`;
-  if (check.status === 'unsupported') text = 'Security check unavailable in this Homebrew version';
+  if (check.status === 'checking') text = 'Checking Formula security information…';
+  else if (check.status === 'unsupported') text = 'Security check unavailable in this Homebrew version';
   else if (check.status === 'failed') text = report ? text + ' · Check failed; retained findings are unconfirmed' : 'Security check failed';
   else if (!check.complete) text += ' · Scan incomplete';
   else text += ' · Homebrew reports complete coverage';
@@ -331,4 +333,15 @@ window.setInventory = function (data) {
     category.value = 'all';
   }
   render();
+};
+
+// Only patch security information; preserve package selection, filters, focus and scroll.
+window.setSecurityCheck = function (report, snapshotID) {
+  if (brewData?.snapshotID !== snapshotID) return;
+  const view = captureInventoryView();
+  brewData.securityCheck = report;
+  securityFindings = new Map((report.report?.findings || []).map(f => [formulaIdentity(f.formula), f]));
+  renderSecurityNote();
+  render();
+  restoreInventoryView(view);
 };

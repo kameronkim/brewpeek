@@ -60,6 +60,7 @@ extension DesktopApp {
       _ = finishPreparation(requestID)
       return false
     }
+    suspendSecurityForOperation()
     operationPhase = .running
     preparationControl = nil
     sendUpdate(["kind": "started", "plan": record, "requestID": requestID])
