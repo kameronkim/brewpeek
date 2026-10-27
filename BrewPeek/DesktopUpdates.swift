@@ -169,10 +169,11 @@ extension DesktopApp {
             to: &result, inventory: engine.inventory, destination: destination,
             invalidatingSizes: Set((result["packages"] as? [Record] ?? []).compactMap { $0["id"] as? String }), installedInfo: engine.latestInstalledInfo)
           result["retryKeys"] = fresh.selected.map(\.id)
-          result["command"] =
-            ([engine.inventory.brew, "upgrade"] + fresh.selected.map(\.argument)).map {
+          result["command"] = try UpgradeTrust.commands(fresh.selected, preview: false).map { arguments in
+            ([engine.inventory.brew] + arguments).map {
               "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'"
             }.joined(separator: " ")
+          }.joined(separator: " && ")
           let completed = result
           DispatchQueue.main.async {
             self.finishPackageOperation(completed, requestID: requestID)

@@ -16,6 +16,8 @@ struct UpgradePackage {
   var reason: String
   var dependencies: [String] = []
   var relationship: String = ""
+  var upgradePath: String? = nil
+  var upgradeArgument: String { upgradePath ?? argument }
   // Native comparison data; the legacy receipt string remains compatible with saved removals.
   var installationReceipts: [InstallationReceipt]? = nil
   func hasSameInstallation(as other: UpgradePackage) -> Bool {
@@ -44,6 +46,7 @@ struct UpgradePlan {
   let excluded: [String]
   var fingerprint: [String] {
     packages.map { $0.id + "|" + $0.current.joined(separator: ",") + "|" + $0.next }.sorted()
+      + selected.map { $0.id + "|" + $0.upgradeArgument }.sorted()
   }
   var record: Record {
     [
@@ -281,6 +284,8 @@ final class Upgrade {
   func prepare(keys: [String], control: UpgradePreparation = UpgradePreparation()) throws
     -> UpgradePlan
   {
+    let trust = try UpgradeTrust.inspect(keys, process: process, control: control)
+    try UpgradeTrust.requireTrusted(trust, keys: keys, brew: inventory.brew)
     let installed = try installed(control: control)
     let selected = try keys.map { id -> UpgradePackage in
       guard var package = installed.first(where: { $0.id == id }), HomebrewPackageName.isValid(package.fullName)
@@ -289,14 +294,15 @@ final class Upgrade {
           message: "The selected package is no longer installed. Refresh and try again.")
       }
       package.reason = "Selected"
+      package.upgradePath = trust.first { $0.id == id }?.argument
       return package
     }
     guard !selected.isEmpty, Set(keys).count == keys.count else {
       throw InventoryError(message: "Select at least one package.")
     }
-    let output = try readOnly(
-      ["upgrade", "--dry-run", "--no-ask"] + selected.map(\.argument), control: control,
-      combinedOutput: true)
+    let output = try UpgradeTrust.commands(selected, preview: true).map { args in
+      try readOnly(args, control: control, combinedOutput: true)
+    }.joined(separator: "\n\n")
     let names = try Self.plannedNames(output)
     guard !names.isEmpty else {
       throw InventoryError(
@@ -380,64 +386,78 @@ final class Upgrade {
       bufferedLines.removeAll()
       lastEvent = Date()
     }
-    let result = try command(["upgrade", "--no-ask"] + plan.selected.map(\.argument)) { line in
-      let installing = line.contains("Installing")
-      let phase: String?
-      if installing || line.contains("Upgrading") || line.contains("Pouring") {
-        phase = "Installing…"
-      } else if line.contains("Downloading") || line.contains("Fetching") {
-        phase = "Downloading…"
-      } else if line.contains("successfully") || line.contains("🍺") {
-        phase = "Awaiting verification"
-      } else {
-        phase = nil
-      }
-      if let heading = HomebrewDependencyHeading.parse(line) {
-        let names = heading.names
-        for name in names {
-          let dependencyID = Self.relationshipID(name, type: "formula")
-          if !items.contains(where: { Self.relationshipID($0.fullName, type: $0.type) == dependencyID }) {
-            let old = before.first(where: {
-              Self.relationshipID($0.fullName, type: $0.type) == dependencyID
-            })
-            let item = UpgradePackage(
-              name: old?.name ?? name.split(separator: "/").last.map(String.init) ?? name,
-              fullName: old?.fullName ?? HomebrewPackageName.formulaIdentity(name), type: "formula",
-              current: old?.current ?? [], next: "", receipt: old?.receipt ?? "", apps: [],
-              reason: "Detected during execution", dependencies: old?.dependencies ?? [],
-              installationReceipts: old?.installationReceipts)
-            items.append(item)
-            packagesChanged = true
-            states[item.id] = "Waiting for Homebrew"
+    var commandLog = UpdateLogBuffer()
+    var exitCode: Int32 = 0
+    for arguments in try UpgradeTrust.commands(plan.selected, preview: false) {
+      do {
+        let batch = try command(arguments) { line in
+          let installing = line.contains("Installing")
+          let phase: String?
+          if installing || line.contains("Upgrading") || line.contains("Pouring") {
+            phase = "Installing…"
+          } else if line.contains("Downloading") || line.contains("Fetching") {
+            phase = "Downloading…"
+          } else if line.contains("successfully") || line.contains("🍺") {
+            phase = "Awaiting verification"
+          } else {
+            phase = nil
           }
-        }
-        // Homebrew can reveal a new dependency before JSON metadata includes it.
-        let parentID = Self.relationshipID(heading.parent, type: "formula")
-        let parents = items.indices.filter {
-          Self.relationshipID(items[$0].fullName, type: items[$0].type) == parentID
-        }
-        if parents.count == 1, let parent = parents.first {
-          for name in names {
-            let dependency = Self.relationshipID(name, type: "formula")
-            if !items[parent].dependencies.contains(dependency) {
-              items[parent].dependencies.append(dependency)
-              packagesChanged = true
+          if let heading = HomebrewDependencyHeading.parse(line) {
+            let names = heading.names
+            for name in names {
+              let dependencyID = Self.relationshipID(name, type: "formula")
+              if !items.contains(where: { Self.relationshipID($0.fullName, type: $0.type) == dependencyID }) {
+                let old = before.first(where: {
+                  Self.relationshipID($0.fullName, type: $0.type) == dependencyID
+                })
+                let item = UpgradePackage(
+                  name: old?.name ?? name.split(separator: "/").last.map(String.init) ?? name,
+                  fullName: old?.fullName ?? HomebrewPackageName.formulaIdentity(name), type: "formula",
+                  current: old?.current ?? [], next: "", receipt: old?.receipt ?? "", apps: [],
+                  reason: "Detected during execution", dependencies: old?.dependencies ?? [],
+                  installationReceipts: old?.installationReceipts)
+                items.append(item)
+                packagesChanged = true
+                states[item.id] = "Waiting for Homebrew"
+              }
+            }
+            // Homebrew can reveal a new dependency before JSON metadata includes it.
+            let parentID = Self.relationshipID(heading.parent, type: "formula")
+            let parents = items.indices.filter {
+              Self.relationshipID(items[$0].fullName, type: items[$0].type) == parentID
+            }
+            if parents.count == 1, let parent = parents.first {
+              for name in names {
+                let dependency = Self.relationshipID(name, type: "formula")
+                if !items[parent].dependencies.contains(dependency) {
+                  items[parent].dependencies.append(dependency)
+                  packagesChanged = true
+                }
+              }
+            }
+            items = Self.explainRelationships(items)
+          }
+          // Output is activity, not proof of success. Percentages are intentionally not inferred.
+          if let phase {
+            for p in items where activityMatcher.matches(p.name, in: line) {
+              states[p.id] = phase
+              if phase != "Downloading…" { touched.insert(p.id) }
             }
           }
+          if !bufferedLines.isEmpty { bufferedLines.append("\n") }
+          bufferedLines.append(line)
+          if Date().timeIntervalSince(lastEvent) >= 0.1 { flushActivity() }
         }
-        items = Self.explainRelationships(items)
+        commandLog.append(batch.1)
+        if batch.0 != 0 { exitCode = batch.0 }
+      } catch {
+        // Earlier batches may have changed packages; always verify installed metadata.
+        commandLog.append("Homebrew could not finish execution: " + error.localizedDescription)
+        exitCode = -1
+        break
       }
-      // Output is activity, not proof of success. Percentages are intentionally not inferred.
-      if let phase {
-        for p in items where activityMatcher.matches(p.name, in: line) {
-          states[p.id] = phase
-          if phase != "Downloading…" { touched.insert(p.id) }
-        }
-      }
-      if !bufferedLines.isEmpty { bufferedLines.append("\n") }
-      bufferedLines.append(line)
-      if Date().timeIntervalSince(lastEvent) >= 0.1 { flushActivity() }
     }
+    let result = (exitCode, commandLog.text)
     if !bufferedLines.isEmpty { flushActivity() }
     let commandWarning = result.0 == 0 ? ""
       : "Homebrew exited with an error (code \(result.0)). Review activity for details."
