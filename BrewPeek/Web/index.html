@@ -39,6 +39,7 @@
       </header>
       <section class="overview" aria-label="Installation overview" id="overview"></section>
       <p class="note" id="overview-note"></p>
+      <p class="note" id="security-note" role="status" hidden></p>
       <div class="toolbar">
         <div class="search-line">
           <label class="searchbox"
@@ -145,6 +146,7 @@
         <p>Homebrew may also update related packages.</p>
         <div class="dialog-actions">
           <button class="subtle-btn" id="cancel">Cancel</button
+          ><button class="subtle-btn" id="quit-update-apps" hidden>Quit app</button
           ><button class="subtle-btn" id="retry-plan" hidden>Retry</button
           ><button class="update-btn bulk" id="start">Update</button>
         </div>

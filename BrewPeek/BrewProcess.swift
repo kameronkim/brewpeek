@@ -11,6 +11,7 @@ final class BrewProcess {
       "HOMEBREW_NO_AUTO_UPDATE", "HOMEBREW_NO_API_AUTO_UPDATE", "HOMEBREW_NO_ANALYTICS",
       "HOMEBREW_NO_ASK", "HOMEBREW_NO_UPGRADE_QUIT_CASKS",
     ] { env[name] = "1" }
+    env.removeValue(forKey: "HOMEBREW_NO_REQUIRE_TAP_TRUST")
     env["HOMEBREW_DOWNLOAD_CONCURRENCY"] = "auto"
     env["SUDO_ASKPASS"] = "/usr/bin/false"
     env["TERM"] = "dumb"
@@ -34,6 +35,10 @@ final class BrewProcess {
     else {
       throw InventoryError(message: "Invalid preparation command.")
     }
+    if arguments.first == "upgrade" {
+      let names = arguments.dropFirst().filter { !$0.hasPrefix("--") }
+      guard !names.isEmpty, names.allSatisfy(UpgradeTrust.isSafeArgument) else { throw InventoryError(message: "Unsafe upgrade preview arguments. Inspect package trust first.") }
+    }
     return try runPreparation(
       arguments, control: control, combinedOutput: combinedOutput,
       environmentOverrides: environmentOverrides)
@@ -42,6 +47,10 @@ final class BrewProcess {
   func dependencyProjection(_ script: String, control: UpgradePreparation) throws -> String {
     try runPreparation(
       ["ruby", "-e", script], control: control,
+      environmentOverrides: ["HOMEBREW_DEV_CMD_RUN": "1"])
+  }
+  func trustInspection(_ script: String, control: UpgradePreparation) throws -> String {
+    try runPreparation(["ruby", "-e", script], control: control,
       environmentOverrides: ["HOMEBREW_DEV_CMD_RUN": "1"])
   }
   private func runPreparation(

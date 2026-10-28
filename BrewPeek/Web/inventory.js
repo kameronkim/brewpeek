@@ -15,6 +15,7 @@ const state = {
   expanded: new Set()
 };
 let allPackages = [];
+let securityFindings = new Map();
 let packageSearch = new Map();
 let sortedPackages = null;
 const $ = (id) => document.getElementById(id);
@@ -86,6 +87,56 @@ function compare(a, b) {
 function field(label, content, wide = false) {
   return `<div class="detail-field${wide === 'full' ? ' full' : wide ? ' wide' : ''}"><dt>${label}</dt><dd>${content}</dd></div>`;
 }
+// Security findings come only from Homebrew's Formula scanner, independently of update availability.
+const formulaIdentity = name => name.replace(/^homebrew\/core\//, '');
+function securityFor(p) {
+  return p.type === 'formula' ? securityFindings.get(formulaIdentity(key(p).slice(8))) : null;
+}
+function securityDetail(p) {
+  if (p.type !== 'formula') return '';
+  const check = brewData.securityCheck;
+  if (!check) return '';
+  const report = check.report;
+  const finding = securityFor(p);
+  const id = formulaIdentity(key(p).slice(8));
+  const includes = names => (names || []).some(name => formulaIdentity(name) === id);
+  let notes = [];
+  if (check.status === 'checking') notes.push('Checking Formula security information…');
+  if (check.status === 'unsupported') notes.push('This Homebrew does not support vulnerability scan coverage JSON.');
+  if (check.status === 'failed') notes.push('Security check failed. Any retained findings are unconfirmed.');
+  else if (check.complete === false) notes.push('Scan incomplete. Findings do not cover every installed Formula.');
+  if (includes(report?.skipped_formulae)) notes.push('Not scanned: no supported source URL.');
+  if (includes(report?.outdated_without_sbom)) notes.push('Installed source unknown: no SBOM for this old version. Findings may reflect the current Formula recipe.');
+  const reason = Object.entries(report?.unscanned_formulae || {}).find(([name]) => formulaIdentity(name) === id)?.[1];
+  if (reason) notes.push(`Not scanned: ${reason}.`);
+  if (finding) {
+    notes.push(`Reported version: ${finding.version}`);
+    for (const [label, items] of [['Open finding', finding.vulnerabilities], ['Resolved by Formula patch', finding.patched]]) {
+      for (const item of items || []) {
+        notes.push(`${label}: ${item.id} · ${item.severity}${item.summary ? ' · ' + item.summary : ''}${item.fixed_versions?.length ? ' · Reported fixes: ' + item.fixed_versions.join(', ') : ''}`);
+      }
+    }
+  } else if (report) notes.push('No finding reported for this Formula. This is not a safety guarantee.');
+  return notes.length ? field('SECURITY · HOMEBREW', notes.map(esc).join('<br>'), true) : '';
+}
+function renderSecurityNote() {
+  const check = brewData.securityCheck;
+  const note = $('security-note');
+  note.hidden = !check;
+  if (!check) return;
+  const report = check.report;
+  const findings = report?.findings || [];
+  const open = findings.filter(f => f.vulnerabilities?.length).length;
+  const patched = findings.filter(f => f.patched?.length).length;
+  let text = `Security · ${open} Formulae with open findings · ${patched} with findings resolved by Formula patches`;
+  if (check.status === 'checking') text = 'Checking Formula security information…';
+  else if (check.status === 'unsupported') text = 'Security check unavailable in this Homebrew version';
+  else if (check.status === 'failed') text = report ? text + ' · Check failed; retained findings are unconfirmed' : 'Security check failed';
+  else if (!check.complete) text += ' · Scan incomplete';
+  else text += ' · Homebrew reports complete coverage';
+  note.textContent = text + ' · Formulae only; Casks are not scanned. No safety guarantee.';
+  note.title = [check.error, check.diagnostic].filter(Boolean).join('\n');
+}
 function detail(p) {
   let fields =
     field('CATEGORY', esc(p.category)) +
@@ -102,7 +153,7 @@ function detail(p) {
     field('DEPENDENCIES', list(p.dependencies)) +
     field('USED BY · INSTALLED FORMULAE', list(p.usedBy)) +
     field('DISK USAGE', size(p.size)) +
-    field('INSTALLED PATH', list(p.paths), true);
+    field('INSTALLED PATH', list(p.paths), true) + securityDetail(p);
   if (p.type === 'cask') {
     fields += field(
       'ACTUAL APP',
@@ -129,7 +180,7 @@ function detail(p) {
 function row(p) {
   const id = 'detail-' + encodeURIComponent(key(p)),
     open = state.expanded.has(key(p));
-  return `<tr class="package-row" data-key="${esc(key(p))}"><td><button class="package-button" aria-expanded="${open}" aria-controls="${esc(id)}"><span class="chevron" aria-hidden="true">${open ? '−' : '+'}</span><span class="package-name">${highlighted(p.name)}</span>${p.deprecated === true ? '<span class="deprecated-label">DEPRECATED</span>' : ''}<span class="sr-only"> details</span></button><p class="description">${highlighted(p.type === 'cask' ? [p.displayName, p.description].filter(Boolean).join(' · ') : p.description)}</p></td><td class="version"><div class="version-content"><span class="installed-value" title="${esc(p.version)}">${esc(p.version)}</span>${p.availableVersion ? `<span class="available-version"><span class="available-value" title="${esc(p.availableVersion)}">Available: ${esc(p.availableVersion)}</span></span><button class="update-btn row-update" data-update="${esc(key(p))}">Update</button>` : ''}</div></td>${p.type === 'formula' ? `<td><span class="status ${p.leaf ? 'leaf' : ''}">${status(p)}</span>${p.direct ? '<span class="direct-label">DIRECT</span>' : ''}</td>` : ''}</tr><tr class="detail-row" id="${esc(id)}" ${open ? '' : 'hidden'}><td colspan="${p.type === 'formula' ? 3 : 2}">${open ? detail(p) : ''}</td></tr>`;
+  return `<tr class="package-row" data-key="${esc(key(p))}"><td><button class="package-button" aria-expanded="${open}" aria-controls="${esc(id)}"><span class="chevron" aria-hidden="true">${open ? '−' : '+'}</span><span class="package-name">${highlighted(p.name)}</span>${p.deprecated === true ? '<span class="deprecated-label">DEPRECATED</span>' : ''}${securityFor(p)?.vulnerabilities?.length ? '<span class="security-label">SECURITY REVIEW</span>' : ''}<span class="sr-only"> details</span></button><p class="description">${highlighted(p.type === 'cask' ? [p.displayName, p.description].filter(Boolean).join(' · ') : p.description)}</p></td><td class="version"><div class="version-content"><span class="installed-value" title="${esc(p.version)}">${esc(p.version)}</span>${p.availableVersion ? `<span class="available-version"><span class="available-value" title="${esc(p.availableVersion)}">Available: ${esc(p.availableVersion)}</span></span><button class="update-btn row-update" data-update="${esc(key(p))}">Update</button>` : ''}</div></td>${p.type === 'formula' ? `<td><span class="status ${p.leaf ? 'leaf' : ''}">${status(p)}</span>${p.direct ? '<span class="direct-label">DIRECT</span>' : ''}</td>` : ''}</tr><tr class="detail-row" id="${esc(id)}" ${open ? '' : 'hidden'}><td colspan="${p.type === 'formula' ? 3 : 2}">${open ? detail(p) : ''}</td></tr>`;
 }
 function countLabel(count, total) {
   return count === total ? `${count} total` : `${count} of ${total}`;
@@ -181,6 +232,7 @@ function sortBy(col, trigger) {
   restoreInventoryFocus(focus);
 }
 function renderOverview() {
+  renderSecurityNote();
   const env = brewData.environment;
   $('footer-updated').textContent = 'Last updated · ' + env.updated;
   const leafCount = brewData.formulae.filter((p) => p.leaf).length;
@@ -255,6 +307,7 @@ $('packages').addEventListener('click', (event) => {
 });
 window.setInventory = function (data) {
   brewData = data;
+  securityFindings = new Map((data.securityCheck?.report?.findings || []).map(f => [formulaIdentity(f.formula), f]));
   allPackages = [...data.formulae, ...data.casks];
   // Snapshot replacement also invalidates cached metadata and package order.
   packageSearch = new Map(
@@ -280,4 +333,15 @@ window.setInventory = function (data) {
     category.value = 'all';
   }
   render();
+};
+
+// Only patch security information; preserve package selection, filters, focus and scroll.
+window.setSecurityCheck = function (report, snapshotID) {
+  if (brewData?.snapshotID !== snapshotID) return;
+  const view = captureInventoryView();
+  brewData.securityCheck = report;
+  securityFindings = new Map((report.report?.findings || []).map(f => [formulaIdentity(f.formula), f]));
+  renderSecurityNote();
+  render();
+  restoreInventoryView(view);
 };

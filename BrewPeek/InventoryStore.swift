@@ -89,6 +89,7 @@ enum InventoryStore {
       environment[field] = try text(environment, field)
     }
     for field in ["cellarSize", "caskSize"] { environment[field] = try number(environment, field) }
+    value["securityCheck"] = FormulaSecurity.normalize(value["securityCheck"])
     value["environment"] = environment
     return value
   }

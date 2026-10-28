@@ -13,6 +13,7 @@ enum PackageOperationPhase {
 
 enum PackageOperationPlan {
   case update(UpgradePlan)
+  case trust(UpgradeTrustPlan)
   case uninstall(PackageRemovalPlan)
   case cleanup(CleanupPlan)
   case versions(VersionCleanupPlan)
@@ -20,6 +21,7 @@ enum PackageOperationPlan {
   var record: Record {
     switch self {
     case .update(let plan): return plan.record
+    case .trust(let plan): return plan.record
     case .uninstall(let plan): return plan.record
     case .cleanup(let plan): return plan.record
     case .versions(let plan): return plan.record
@@ -41,6 +43,13 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   var hasDisplayedData = false
   var inventoryRefreshState = "idle"
   var collectingInventory: Inventory?
+  var securityInventory: Inventory?
+  var securityContext: SecuritySnapshotContext?
+  var securityGeneration: UUID?
+  var interruptedSecurityContext: SecuritySnapshotContext?
+  var latestSecurityReport: (snapshotID: String, report: Record)?
+  let securitySupportCache = FormulaSecurity.SupportCache()
+  var terminating = false
   // Inventory refresh, recovery inspection and app removal have separate lifetimes.
   var auxiliaryBusy = false
   var operationPhase: PackageOperationPhase = .idle
@@ -50,6 +59,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   var cancelledPreparationRequestID: String?
   var updatePreparing: Bool { operationPhase.isPreparing }
   var preparationControl: UpgradePreparation?
+  var blockedUpdateToken: String?
   var operationPlan: PackageOperationPlan?
   var hasOperationPlan: Bool { operationPlan != nil }
   var recoveryChecked = false
@@ -191,6 +201,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   @objc func refresh() {
     guard !busy, !hasOperationPlan, updateRequestID == nil
     else { return }
+    cancelSecurityRefresh()
     reportLoadID = nil
     recoveryChecked = false
     auxiliaryBusy = true
@@ -275,6 +286,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
             if self.inventoryRefreshState != "refreshing" { self.showLoadingFailure() }
             return
           }
+          self.observeSecuritySnapshot(snapshot)
           self.web.isHidden = false
           self.web.callAsyncJavaScript(
             """
@@ -296,6 +308,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
               self.web.isHidden = false
               self.restoreWebOperationState()
               self.restorePendingRemoval()
+              self.startSecurityRefresh(snapshot)
             }
           }
         case .failure(let error):
@@ -353,6 +366,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   @objc func removeApp() {
     guard !busy, !hasOperationPlan, updateRequestID == nil
     else { return }
+    cancelSecurityRefresh()
     auxiliaryBusy = true
     refreshButton.isEnabled = false
     let app = Bundle.main.bundleURL
@@ -369,6 +383,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
       guard response == .alertSecondButtonReturn else {
         self.auxiliaryBusy = false
         self.refreshButton.isEnabled = true
+        self.loadReport()
         return
       }
       do {
@@ -438,6 +453,8 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     reportLoadID = nil
   }
   func applicationWillTerminate(_ notification: Notification) {
+    terminating = true
+    cancelSecurityRefresh()
     reportLoadID = nil
     collectingInventory?.cancel()
     preparationControl?.cancelAndWait()

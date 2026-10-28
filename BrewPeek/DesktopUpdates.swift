@@ -3,18 +3,23 @@ import WebKit
 
 extension DesktopApp {
   func sendUpdate(_ event: Record) {
+    if let snapshot = event["snapshot"] as? Record { observeSecuritySnapshot(snapshot) }
     rememberWebOperationEvent(event)
     if recoveringWebContent {
       reloadTerminatedWebContentIfReady()
       return
     }
-    guard pageReady else { return }
+    guard pageReady else {
+      if let snapshot = event["snapshot"] as? Record { startSecurityRefresh(snapshot) }
+      return
+    }
     web.callAsyncJavaScript(
       "window.receiveUpdate(event)", arguments: ["event": event], in: nil, in: .page
     ) { result in
       if case .failure(let error) = result {
         NSLog("Update UI delivery failed: %@", error.localizedDescription)
       }
+      if let snapshot = event["snapshot"] as? Record { self.startSecurityRefresh(snapshot) }
     }
   }
   func handleUpdate(_ body: Any) {
@@ -33,6 +38,31 @@ extension DesktopApp {
     if ["prepare", "prepareUninstall", "prepareVersions"].contains(action),
       let keys = request["keys"] as? [String] { webRecoveryKeys = keys }
     switch action {
+    case "quitUpdateApps":
+      guard let token = request["token"] as? String,
+        let requestID = request["requestID"] as? String, requestID == updateRequestID,
+        case let .update(plan)? = operationPlan, token == plan.token,
+        token == blockedUpdateToken
+      else { return }
+      let apps = matchingRunningApps(for: plan.packages).filter {
+        $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
+      }
+      var declined: [String] = []
+      for app in apps {
+        if !app.terminate() { declined.append(app.localizedName ?? "App") }
+      }
+      sendUpdate([
+        "kind": "appQuitRequested", "requestID": requestID,
+        "message": apps.isEmpty
+          ? "The apps are no longer running. Retry to continue."
+          : declined.isEmpty
+            ? "Quit requested. Save any open work and wait for the apps to close, then retry."
+            : "Some apps could not be asked to quit. Close them manually, then retry.",
+      ])
+    case "startTrust":
+      guard let token = request["token"] as? String, case let .trust(plan)? = operationPlan,
+        token == plan.token else { return }
+      startUpdateTrust(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "prepareVersions":
       guard let keys = request["keys"] as? [String], keys.count == 1 else { return }
       prepareVersionCleanup(
@@ -76,6 +106,7 @@ extension DesktopApp {
   }
 
   private func cancelUpdatePreparation() {
+    blockedUpdateToken = nil
     if updatePreparing {
       // Keep ownership until the worker acknowledges cancellation; do not admit another task yet.
       cancelledPreparationRequestID = updateRequestID
@@ -94,6 +125,7 @@ extension DesktopApp {
     operation: String? = nil, message: String? = nil
   ) -> UpgradePreparation {
     reportLoadID = nil
+    blockedUpdateToken = nil
     operationPhase = rechecking ? .rechecking : .preparing
     updateRequestID = requestID
     cancelledPreparationRequestID = nil
@@ -107,9 +139,9 @@ extension DesktopApp {
     return control
   }
 
-  private func prepareUpdate(keys: [String], requestID: String) {
+  func prepareUpdate(keys: [String], requestID: String, brew: String? = nil) {
     preparePackagePlan(requestID: requestID, operation: "update") { control, _ in
-      .update(try Upgrade(brew: Inventory.locateBrew()).prepare(keys: keys, control: control))
+      .update(try Upgrade(brew: brew ?? Inventory.locateBrew()).prepare(keys: keys, control: control))
     }
   }
 
@@ -117,12 +149,7 @@ extension DesktopApp {
     updateRequestID = requestID
     let active = runningApps(for: plan.packages)
     guard active.isEmpty else {
-      operationPlan = nil
-      sendUpdate([
-        "kind": "error", "runningApps": Array(Set(active)).sorted(),
-        "message": "Close these apps before updating, then retry: "
-          + active.joined(separator: ", "), "requestID": requestID,
-      ])
+      reportRunningUpdateApps(active, plan: plan, requestID: requestID)
       return
     }
     let control = beginPackagePreparation(
@@ -151,10 +178,11 @@ extension DesktopApp {
             to: &result, inventory: engine.inventory, destination: destination,
             invalidatingSizes: Set((result["packages"] as? [Record] ?? []).compactMap { $0["id"] as? String }), installedInfo: engine.latestInstalledInfo)
           result["retryKeys"] = fresh.selected.map(\.id)
-          result["command"] =
-            ([engine.inventory.brew, "upgrade"] + fresh.selected.map(\.argument)).map {
+          result["command"] = try UpgradeTrust.commands(fresh.selected, preview: false).map { arguments in
+            ([engine.inventory.brew] + arguments).map {
               "'" + $0.replacingOccurrences(of: "'", with: "'\\''") + "'"
             }.joined(separator: " ")
+          }.joined(separator: " && ")
           let completed = result
           DispatchQueue.main.async {
             self.finishPackageOperation(completed, requestID: requestID)
@@ -162,6 +190,10 @@ extension DesktopApp {
         }
       } catch {
         DispatchQueue.main.async {
+          if let required = error as? UpgradeTrustRequired {
+            self.publishPackagePlan(.trust(required.plan), requestID: requestID)
+            return
+          }
           guard self.finishPackageOperation([
             "kind": "error", "message": error.localizedDescription,
           ], requestID: requestID) else { return }
@@ -179,14 +211,21 @@ extension DesktopApp {
     let active = runningApps(for: plan.packages)
     guard active.isEmpty else {
       guard finishPreparation(requestID) else { return false }
-      sendUpdate([
-        "kind": "error", "runningApps": active, "requestID": requestID,
-        "message": "Close these apps before updating, then retry: "
-          + active.joined(separator: ", "),
-      ])
+      reportRunningUpdateApps(active, plan: plan, requestID: requestID)
       return false
     }
     return beginPackageExecution(record: plan.record, requestID: requestID)
+  }
+
+  /// Retain the approved plan so Retry rechecks it instead of requesting approval again.
+  private func reportRunningUpdateApps(_ names: [String], plan: UpgradePlan, requestID: String) {
+    operationPlan = .update(plan)
+    blockedUpdateToken = plan.token
+    sendUpdate([
+      "kind": "error", "runningApps": names, "retryUpdateToken": plan.token,
+      "message": "Close these apps before updating, then retry: " + names.joined(separator: ", "),
+      "requestID": requestID,
+    ])
   }
 
   /// Runs on the main queue, including the final cancellation gate before mutation.
@@ -214,6 +253,7 @@ extension DesktopApp {
     guard updateRequestID == requestID else { return false }
     if updatePreparing, !finishPreparation(requestID) { return false }
     operationPhase = .idle
+    blockedUpdateToken = nil
     operationPlan = nil
     preparationControl = nil
     cancelledPreparationRequestID = nil
@@ -221,22 +261,23 @@ extension DesktopApp {
     var completed = event
     completed["requestID"] = requestID
     sendUpdate(completed)
+    finishInterruptedSecurity(hasFreshSnapshot: completed["snapshot"] is Record)
     return true
   }
 
-  func runningApps(for packages: [UpgradePackage]) -> [String] {
-    let names = NSWorkspace.shared.runningApplications.compactMap { app -> String? in
-      guard let url = app.bundleURL,
-        packages.contains(where: { package in
-          package.type == "cask"
-            && package.apps.contains { path in
-              CaskApps.matches(path, running: url)
-            }
-        })
-      else { return nil }
-      return app.localizedName ?? url.deletingPathExtension().lastPathComponent
+  func matchingRunningApps(for packages: [UpgradePackage]) -> [NSRunningApplication] {
+    NSWorkspace.shared.runningApplications.filter { app in
+      guard let url = app.bundleURL else { return false }
+      return packages.contains { package in
+        package.type == "cask" && package.apps.contains { CaskApps.matches($0, running: url) }
+      }
     }
-    return Array(Set(names)).sorted()
+  }
+
+  func runningApps(for packages: [UpgradePackage]) -> [String] {
+    Array(Set(matchingRunningApps(for: packages).map {
+      $0.localizedName ?? $0.bundleURL?.deletingPathExtension().lastPathComponent ?? "App"
+    })).sorted()
   }
   private func permitClose() -> Bool {
     guard

@@ -15,6 +15,10 @@ extension DesktopApp {
         case .success(let plan):
           self.publishPackagePlan(plan, requestID: requestID)
         case .failure(let error):
+          if let required = error as? UpgradeTrustRequired {
+            self.publishPackagePlan(.trust(required.plan), requestID: requestID)
+            return
+          }
           guard self.finishPreparation(requestID) else { return }
           self.sendUpdate([
             "kind": "error", "message": error.localizedDescription, "requestID": requestID,
@@ -56,6 +60,7 @@ extension DesktopApp {
       _ = finishPreparation(requestID)
       return false
     }
+    suspendSecurityForOperation()
     operationPhase = .running
     preparationControl = nil
     sendUpdate(["kind": "started", "plan": record, "requestID": requestID])

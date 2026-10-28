@@ -4,6 +4,7 @@ let updateMode = 'ready',
   requestedKeys = [],
   previousResult = null;
 let activeRequest = null;
+let retryUpdateToken = null;
 let operationKind = 'update';
 let cleanupTaskID = null;
 let processedPackages = 0;
@@ -18,7 +19,7 @@ let popupReturnFocus = null;
 let pendingCancelFocus = null;
 let operationScrollPending = false;
 const updateBusy = () =>
-  ['checking', 'cancelling', 'discarding', 'running', 'verifying', 'confirming', 'recovering'].includes(updateMode);
+  ['checking', 'trusting', 'cancelling', 'discarding', 'running', 'verifying', 'confirming', 'recovering'].includes(updateMode);
 const postUpdate = (message) => window.webkit.messageHandlers.packageUpdate.postMessage(message);
 const bulk = document.createElement('button');
 bulk.className = 'update-btn bulk';
@@ -169,6 +170,7 @@ $('notice').addEventListener('close', () => {
 function checkChanges(keys, trigger = document.activeElement, operation = 'update') {
   if (updateBusy() || inventoryRefreshState !== 'idle' || !keys.length) return;
   if (!popupScroll) popupReturnFocus = captureInventoryFocus(trigger);
+  retryUpdateToken = null;
   operationKind = operation;
   requestedKeys = keys;
   activeRequest = crypto.randomUUID();
@@ -177,12 +179,13 @@ function checkChanges(keys, trigger = document.activeElement, operation = 'updat
 }
 function setConfirmState(mode) {
   delete $('confirm').dataset.issue;
+  $('quit-update-apps').hidden = true;
   $('confirm').dataset.operation = operationKind;
-  document.querySelector('.confirm-heading .eyebrow').textContent = operationKind === 'version-cleanup' ? 'VERSION CLEANUP' : operationKind.startsWith('cleanup') ? 'DEPENDENCY CLEANUP' : operationKind === 'uninstall' ? 'PACKAGE UNINSTALL' : 'PACKAGE UPDATE';
+  document.querySelector('.confirm-heading .eyebrow').textContent = operationKind === 'trust' ? 'PACKAGE TRUST' : operationKind === 'version-cleanup' ? 'VERSION CLEANUP' : operationKind.startsWith('cleanup') ? 'DEPENDENCY CLEANUP' : operationKind === 'uninstall' ? 'PACKAGE UNINSTALL' : 'PACKAGE UPDATE';
   $('start').disabled = false;
   $('start').textContent = operationKind === 'uninstall' ? 'Uninstall' : 'Update';
   document.querySelector('.confirm-bottom > p').textContent = operationKind === 'uninstall' ? 'Settings and support files may remain.' : 'Homebrew may also update related packages.';
-  document.querySelector('.confirm-scroll').setAttribute('aria-label', operationKind === 'version-cleanup' ? 'Installed versions' : operationKind.startsWith('cleanup') ? 'Remaining dependencies' : operationKind === 'uninstall' ? 'Packages to uninstall' : 'Packages to update');
+  document.querySelector('.confirm-scroll').setAttribute('aria-label', operationKind === 'trust' ? 'Packages requiring trust' : operationKind === 'version-cleanup' ? 'Installed versions' : operationKind.startsWith('cleanup') ? 'Remaining dependencies' : operationKind === 'uninstall' ? 'Packages to uninstall' : 'Packages to update');
   $('confirm').dataset.state = mode;
   document.querySelector('.confirm-scroll').hidden = mode !== 'confirming';
   document.querySelector('.confirm-bottom > p').hidden = mode !== 'confirming';
@@ -204,12 +207,16 @@ function showChecking(message) {
   setConfirmState('checking');
   $('confirm-title').focus({ preventScroll: true });
 }
-function showCheckError(message, runningApps = []) {
+function showCheckError(message, runningApps = [], token = null) {
+  retryUpdateToken = operationKind === 'update' ? token : null;
   updatePlan = null;
   setUpdateMode('check-failed');
   setConfirmState('check-failed');
   if (runningApps.length) {
     $('confirm').dataset.issue = 'running-apps';
+    $('quit-update-apps').hidden = !retryUpdateToken;
+    $('quit-update-apps').disabled = false;
+    $('quit-update-apps').textContent = runningApps.length === 1 ? 'Quit app' : 'Quit apps';
     $('confirm-title').textContent = 'Close apps to continue';
     $('confirm-copy').textContent = `Quit the apps below, then retry the ${operationKind === 'uninstall' ? 'uninstall' : 'update'}.`;
     $('confirm-error').innerHTML =
@@ -222,16 +229,41 @@ function showCheckError(message, runningApps = []) {
   $('retry-plan').focus({ preventScroll: true });
 }
 function retryOperation(trigger) {
-  if (operationKind === 'cleanup-discard') confirmDiscardCleanup(trigger);
+  if (operationKind === 'update' && retryUpdateToken) {
+    if (updateBusy() || inventoryRefreshState !== 'idle') return;
+    const token = retryUpdateToken;
+    retryUpdateToken = null;
+    activeRequest = crypto.randomUUID();
+    showChecking('Rechecking the confirmed plan…');
+    postUpdate({ action: 'start', token, requestID: activeRequest });
+  } else if (operationKind === 'cleanup-discard') confirmDiscardCleanup(trigger);
   else if (operationKind === 'cleanup') checkCleanup(trigger);
-  else checkChanges(requestedKeys, trigger, operationKind);
+  else checkChanges(requestedKeys, trigger, operationKind === 'trust' ? 'update' : operationKind);
 }
+$('quit-update-apps').onclick = () => {
+  if (updateMode !== 'check-failed' || !retryUpdateToken) return;
+  $('quit-update-apps').disabled = true;
+  postUpdate({ action: 'quitUpdateApps', token: retryUpdateToken, requestID: activeRequest });
+};
 $('retry-plan').onclick = () => retryOperation($('retry-plan'));
 function showPlan(plan, changed) {
+  retryUpdateToken = null;
   updatePlan = plan;
   operationKind = plan.operation || 'update';
   setUpdateMode('confirming');
   setConfirmState('confirming');
+  if (operationKind === 'trust') {
+    requestedKeys = plan.keys;
+    document.querySelector('.confirm-heading .eyebrow').textContent = 'PACKAGE TRUST';
+    $('confirm-title').textContent = 'Trust these packages?';
+    $('confirm-copy').textContent = (changed ? 'The trust targets changed. Review them again. ' : '') + 'Homebrew requires trust before it can load these packages. This changes Homebrew trust settings; no package update will start.';
+    const headers = document.querySelectorAll('.confirm-table th');
+    headers[0].textContent = 'Package'; headers[1].textContent = 'Source'; headers[2].textContent = 'Trust';
+    $('confirm-list').innerHTML = plan.packages.map(p => `<tr><td>${esc(p.name)}<small class="dependency-note">${esc(p.type)}</small></td><td>${esc(p.source)}</td><td>Not trusted</td></tr>`).join('');
+    $('start').textContent = 'Trust packages';
+    document.querySelector('.confirm-bottom > p').textContent = 'Only the listed packages will be trusted. You will review updates separately.';
+    return;
+  }
   if (operationKind === 'version-cleanup') {
     const count = plan.packages.filter(p => p.removable).length;
     $('confirm-title').textContent = count ? 'Remove old versions?' : 'No versions to remove';
@@ -248,6 +280,7 @@ function showPlan(plan, changed) {
     return;
   }
   $('confirm-list').onchange = null;
+  document.querySelector('.confirm-table th:first-child').textContent = 'Name';
   document.querySelector('.confirm-table th:nth-child(2)').textContent = 'Current';
   const cleanup = operationKind === 'cleanup';
   document.querySelector('.confirm-table th:nth-child(3)').textContent = cleanup ? 'Status' : 'New';
@@ -278,7 +311,8 @@ function showPlan(plan, changed) {
   document.querySelector('.confirm-scroll').scrollTop = 0;
 }
 function cancelUpdate() {
-  if (updateMode === 'discarding') return false;
+  retryUpdateToken = null;
+  if (['discarding', 'trusting'].includes(updateMode)) return false;
   const pending = updateMode === 'checking';
   updatePlan = null;
   setUpdateMode(pending ? 'cancelling' : previousResult ? 'result' : 'ready');
@@ -323,7 +357,7 @@ $('start').onclick = () => {
     $('confirm-copy').textContent = 'Removing the saved cleanup task. Installed packages stay on this Mac.';
     $('cancel').disabled = true;
   }
-  postUpdate({ action: operationKind === 'version-cleanup' ? 'startVersions' : operationKind === 'cleanup-discard' ? 'discardCleanup' : operationKind === 'cleanup' ? 'startCleanup' : operationKind === 'uninstall' ? 'startUninstall' : 'start', token, versions, recoveryID: cleanupTaskID, requestID: activeRequest });
+  postUpdate({ action: operationKind === 'trust' ? 'startTrust' : operationKind === 'version-cleanup' ? 'startVersions' : operationKind === 'cleanup-discard' ? 'discardCleanup' : operationKind === 'cleanup' ? 'startCleanup' : operationKind === 'uninstall' ? 'startUninstall' : 'start', token, versions, recoveryID: cleanupTaskID, requestID: activeRequest });
 };
 $('packages').addEventListener(
   'click',
@@ -512,6 +546,13 @@ window.receiveUpdate = function (event) {
       }
       setUpdateMode(previousResult ? 'result' : 'ready');
       break;
+    case 'trusting':
+      setUpdateMode('trusting');
+      setConfirmState('checking');
+      $('confirm-title').textContent = 'Saving approved trust changes…';
+      $('confirm-copy').textContent = 'No package update has started. Keep BrewPeek open until Homebrew finishes.';
+      $('cancel').disabled = true;
+      break;
     case 'checking':
       if (event.operation) operationKind = event.operation;
       showChecking(event.message);
@@ -520,11 +561,13 @@ window.receiveUpdate = function (event) {
       showPlan(event.plan, event.changed);
       break;
     case 'cancelled':
+      retryUpdateToken = null;
       activeRequest = null;
       setUpdateMode(previousResult ? 'result' : 'ready');
       restoreCancelledFocus();
       break;
     case 'started':
+      retryUpdateToken = null;
       $('confirm').close();
       updatePlan = null;
       beginProgress(event.plan);
@@ -566,10 +609,16 @@ window.receiveUpdate = function (event) {
       finishNotice();
       break;
     }
+    case 'appQuitRequested':
+      if (updateMode === 'check-failed' && retryUpdateToken) {
+        $('confirm-copy').textContent = event.message;
+        $('quit-update-apps').disabled = true;
+      }
+      break;
     case 'error':
       clearProgressData();
-      if (['checking', 'discarding', 'confirming', 'check-failed'].includes(updateMode)) {
-        showCheckError(event.message, event.runningApps);
+      if (['checking', 'trusting', 'discarding', 'confirming', 'check-failed'].includes(updateMode)) {
+        showCheckError(event.message, event.runningApps, event.retryUpdateToken);
         break;
       }
       updatePlan = null;
@@ -629,7 +678,7 @@ window.restoreUpdateState = function (events) {
     if (event.retryKeys) requestedKeys = event.retryKeys;
     if (event.plan) {
       operationKind = event.plan.operation || 'update';
-      requestedKeys = event.plan.operation === 'version-cleanup'
+      requestedKeys = event.plan.operation === 'trust' ? event.plan.keys : event.plan.operation === 'version-cleanup'
         ? [event.plan.key]
         : event.plan.packages.filter((p) => p.reason === 'Selected').map((p) => p.id);
     } else if (event.kind === 'result') {

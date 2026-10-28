@@ -67,7 +67,15 @@ final class Inventory {
     }
     return result
   }
-  func run(_ executable: String, _ arguments: [String], timeout: Double = 180) throws -> String {
+  struct CommandResult {
+    let output: String
+    let error: String
+    let status: Int32
+    let exited: Bool
+  }
+  /// Keep stdout separate from exit status for commands whose documented results use exit 1.
+  /// Ordinary callers still require success through run(_:_:timeout:).
+  func runResult(_ executable: String, _ arguments: [String], timeout: Double = 180) throws -> CommandResult {
     try checkCancellation()
     let fm = FileManager.default
     let dir = fm.temporaryDirectory.appendingPathComponent("brew-report-" + UUID().uuidString)
@@ -129,13 +137,17 @@ final class Inventory {
           + arguments.joined(separator: " "))
     }
     try checkCancellation()
-    guard task.terminationStatus == 0 else {
-      let detail = (try? String(contentsOf: err, encoding: .utf8)) ?? ""
-      throw InventoryError(
-        message: executable + " " + arguments.joined(separator: " ") + "\n" + detail)
+    return CommandResult(
+      output: try String(contentsOf: out, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines),
+      error: (try? String(contentsOf: err, encoding: .utf8)) ?? "",
+      status: task.terminationStatus, exited: task.terminationReason == .exit)
+  }
+  func run(_ executable: String, _ arguments: [String], timeout: Double = 180) throws -> String {
+    let result = try runResult(executable, arguments, timeout: timeout)
+    guard result.exited, result.status == 0 else {
+      throw InventoryError(message: executable + " " + arguments.joined(separator: " ") + "\n" + result.error)
     }
-    return try String(contentsOf: out, encoding: .utf8).trimmingCharacters(
-      in: .whitespacesAndNewlines)
+    return result.output
   }
   func lines(_ text: String) -> [String] {
     text.split(whereSeparator: \.isNewline).map(String.init)
@@ -254,7 +266,7 @@ final class Inventory {
 
   func collect(
     refreshMetadata: Bool = true, previous: Record? = nil, invalidatingSizes: Set<String> = [],
-    installedInfo: Record? = nil
+    installedInfo: Record? = nil, includeSecurity: Bool = false
   ) throws -> Record {
     let updates = checkUpdates(refreshMetadata: refreshMetadata)
     try checkCancellation()
@@ -415,7 +427,11 @@ final class Inventory {
       "cellarSize": nullable(sizes.values[cellar]),
       "caskSize": nullable(sizes.values[caskroom]),
     ]
+    let security: Record = includeSecurity ? FormulaSecurity.check(inventory: self)
+      : ["status": "checking", "scope": "formulae"]
+    try checkCancellation()
     return [
+      "snapshotID": UUID().uuidString, "securityCheck": security,
       "formulae": formulas, "casks": applications, "taps": taps, "environment": environment,
       "updateCheck": updates.state, "sizeCache": sizes.cache,
     ]

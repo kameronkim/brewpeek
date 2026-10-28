@@ -18,20 +18,27 @@ enum HomebrewPackageName {
 
 /// Inventory collection and package operations share one nonblocking file lock.
 enum HomebrewOperationLock {
+  enum Failure: LocalizedError {
+    case busy(String)
+    var errorDescription: String? {
+      switch self { case .busy(let message): return message }
+    }
+  }
   static func withLock<T>(
-    at inventory: URL,
+    at inventory: URL, createDirectory: Bool = true,
     openError: String = "Could not open the operation lock.",
     busyError: String = "Another BrewPeek operation is running. Try again when it finishes.",
     _ action: () throws -> T
   ) throws -> T {
     let directory = inventory.deletingLastPathComponent()
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    if createDirectory { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
     let fd = open(
-      directory.appendingPathComponent(".homebrew-report.lock").path, O_CREAT | O_RDWR, 0o600)
+      directory.appendingPathComponent(".homebrew-report.lock").path, createDirectory ? O_CREAT | O_RDWR : O_RDWR, 0o600)
     guard fd >= 0 else { throw InventoryError(message: openError) }
     defer { close(fd) }
     guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
-      throw InventoryError(message: busyError)
+      if errno == EWOULDBLOCK || errno == EAGAIN { throw Failure.busy(busyError) }
+      throw InventoryError(message: openError)
     }
     defer { flock(fd, LOCK_UN) }
     return try action()

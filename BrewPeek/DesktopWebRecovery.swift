@@ -83,6 +83,7 @@ extension DesktopApp {
         self.webRecoveryLoading = false
         self.webRecoveryEvent = nil
         self.restorePendingRemoval()
+        self.restoreSecurityReport()
       }
     }
   }
