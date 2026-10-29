@@ -18,6 +18,28 @@ extension DesktopApp {
     old?.cancel()
   }
 
+  /// Called under the package-operation lock immediately before approved trust writes.
+  func invalidateSecurityForTrustChange() -> SecuritySnapshotContext? {
+    let context = securityContext
+    cancelSecurityRefresh()
+    guard let context else { return nil }
+    securityContext = context
+    let owner = SecurityReportGeneration()
+    securityGeneration = owner
+    publishSecurityReport(["scope": "formulae", "status": "checking"], context: context, owner: owner)
+    return context
+  }
+
+  /// Trust can be partially saved even when the command fails. Recheck independently of Update.
+  func refreshSecurityAfterTrustChange(_ context: SecuritySnapshotContext?, brew: String) {
+    guard let context, securityContext?.id == context.id, !terminating else { return }
+    cancelSecurityRefresh()
+    securityContext = context
+    startSecurityRefresh([
+      "snapshotID": context.id, "securityCheck": ["scope": "formulae", "status": "checking"],
+    ], using: Inventory(brew: brew), at: context.destination)
+  }
+
   /// Record the inventory before handing it to WebKit; execution can start before its callback.
   func observeSecuritySnapshot(_ snapshot: Record, at destination: URL? = nil) {
     guard let id = snapshot["snapshotID"] as? String, securityContext?.id != id else { return }
