@@ -11,10 +11,33 @@ extension DesktopApp {
     let old = securityInventory
     securityInventory = nil
     securityContext = nil
+    securityGeneration?.invalidate()
     securityGeneration = nil
     interruptedSecurityContext = nil
     latestSecurityReport = nil
     old?.cancel()
+  }
+
+  /// Called under the package-operation lock immediately before approved trust writes.
+  func invalidateSecurityForTrustChange() -> SecuritySnapshotContext? {
+    let context = securityContext
+    cancelSecurityRefresh()
+    guard let context else { return nil }
+    securityContext = context
+    let owner = SecurityReportGeneration()
+    securityGeneration = owner
+    publishSecurityReport(["scope": "formulae", "status": "checking"], context: context, owner: owner)
+    return context
+  }
+
+  /// Trust can be partially saved even when the command fails. Recheck independently of Update.
+  func refreshSecurityAfterTrustChange(_ context: SecuritySnapshotContext?, brew: String) {
+    guard let context, securityContext?.id == context.id, !terminating else { return }
+    cancelSecurityRefresh()
+    securityContext = context
+    startSecurityRefresh([
+      "snapshotID": context.id, "securityCheck": ["scope": "formulae", "status": "checking"],
+    ], using: Inventory(brew: brew), at: context.destination)
   }
 
   /// Record the inventory before handing it to WebKit; execution can start before its callback.
@@ -37,7 +60,7 @@ extension DesktopApp {
     guard !hasFreshSnapshot, let context, !terminating else { return }
     cancelSecurityRefresh()
     securityContext = context
-    let owner = UUID()
+    let owner = SecurityReportGeneration()
     securityGeneration = owner
     publishSecurityReport([
       "scope": "formulae", "status": "failed",
@@ -60,7 +83,7 @@ extension DesktopApp {
     cancelSecurityRefresh()
     let context = SecuritySnapshotContext(id: snapshotID, destination: suppliedDestination ?? output)
     securityContext = context
-    let owner = UUID()
+    let owner = SecurityReportGeneration()
     securityGeneration = owner
     let inventory: Inventory
     do { inventory = try suppliedInventory ?? Inventory(brew: Inventory.locateBrew()) }
@@ -83,7 +106,7 @@ extension DesktopApp {
     }
   }
 
-  private func publishSecurityReport(_ report: Record, context: SecuritySnapshotContext, owner: UUID) {
+  private func publishSecurityReport(_ report: Record, context: SecuritySnapshotContext, owner: SecurityReportGeneration) {
     latestSecurityReport = (context.id, report)
     deliverSecurityReport(report, snapshotID: context.id)
     persistSecurityReport(report, context: context, owner: owner)
@@ -91,11 +114,11 @@ extension DesktopApp {
 
   /// Contention is temporary, not a scan failure. Retry only persistence, until ownership changes.
   private func persistSecurityReport(
-    _ report: Record, context: SecuritySnapshotContext, owner: UUID, retryDelay: TimeInterval = 0.1
+    _ report: Record, context: SecuritySnapshotContext, owner: SecurityReportGeneration, retryDelay: TimeInterval = 0.1
   ) {
     guard securityGeneration == owner, !terminating else { return }
     DispatchQueue.global(qos: .utility).async {
-      let result = Result { try SecurityReportStore.update(report, snapshotID: context.id, at: context.destination) }
+      let result = Result { try SecurityReportStore.update(report, snapshotID: context.id, at: context.destination, generation: owner) }
       DispatchQueue.main.async {
         guard self.securityGeneration == owner, !self.terminating else { return }
         switch result {

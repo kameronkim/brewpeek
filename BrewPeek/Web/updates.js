@@ -246,6 +246,25 @@ $('quit-update-apps').onclick = () => {
   postUpdate({ action: 'quitUpdateApps', token: retryUpdateToken, requestID: activeRequest });
 };
 $('retry-plan').onclick = () => retryOperation($('retry-plan'));
+// IDs remain the execution/state keys; qualify only names shared by distinct targets.
+function operationPackageNotes(packages) {
+  const identities = new Map();
+  for (const p of packages) {
+    if (!identities.has(p.name)) identities.set(p.name, new Set());
+    identities.get(p.name).add(p.id || p.name);
+  }
+  return new Map(packages.map(p => {
+    const reason = p.relationship || p.reason;
+    if (identities.get(p.name).size < 2) return [p.id, reason];
+    const [kind, fullName = ''] = (p.id || '').split(':');
+    const type = p.type || kind;
+    const parts = fullName.split('/');
+    const tap = parts.length === 3 ? parts.slice(0, 2).join('/')
+      : type === 'formula' ? 'homebrew/core' : type === 'cask' ? 'homebrew/cask' : '';
+    return [p.id, [type === 'formula' ? 'Formula' : type === 'cask' ? 'Cask' : type, tap, reason].filter(Boolean).join(' · ')];
+  }));
+}
+
 function showPlan(plan, changed) {
   retryUpdateToken = null;
   updatePlan = plan;
@@ -302,10 +321,11 @@ function showPlan(plan, changed) {
     (changed ? 'The plan changed. Review it before continuing. ' : '') +
     (operationKind === 'uninstall' ? `Homebrew will uninstall this ${plan.packages[0].type === 'cask' ? 'Cask' : 'Formula'}${plan.packages.length > 1 ? ` and remove ${plan.packages.length - 1} unused ${plan.packages.length === 2 ? 'dependency' : 'dependencies'}` : ''}. ${plan.packages[0].type === 'formula' && plan.packages[0].installedVersions?.length > 1 ? 'All installed versions of this Formula will be removed. ' : ''}Shared and directly installed dependencies are kept.` : `${plan.selectedCount} selected · ${plan.packages.length - plan.selectedCount} additional changes.`) +
     (plan.excluded?.length ? ` Homebrew excluded: ${plan.excluded.join(', ')}.` : '');
+  const notes = operationPackageNotes(plan.packages);
   $('confirm-list').innerHTML = plan.packages
     .map(
       (p) =>
-        `<tr><td>${esc(p.name)}<small class="dependency-note">${esc(p.relationship || p.reason)}</small></td><td>${p.action === 'install' ? 'Not installed' : esc(p.version)}</td><td>${esc(p.availableVersion)}</td></tr>`
+        `<tr><td>${esc(p.name)}<small class="dependency-note">${esc(notes.get(p.id))}</small></td><td>${p.action === 'install' ? 'Not installed' : esc(p.version)}</td><td>${esc(p.availableVersion)}</td></tr>`
     )
     .join('');
   document.querySelector('.confirm-scroll').scrollTop = 0;
@@ -445,17 +465,18 @@ function paintProgress(processed = processedPackages) {
   if (!$('progress-items').open) return;
   const container = $('progress-rows');
   const rows = new Map([...container.children].map((node) => [node.dataset.package, node]));
+  const notes = operationPackageNotes(progressPackages);
   for (const p of progressPackages) {
     let row = rows.get(p.id);
     if (!row) {
       row = document.createElement('div');
       row.className = 'download-item';
       row.dataset.package = p.id;
-      row.innerHTML = `<span>${esc(p.name)}<small class="dependency-note">${esc(p.relationship || p.reason)}</small></span><div class="progress-track"><div class="progress-fill"></div></div><span class="download-state"></span>`;
+      row.innerHTML = `<span>${esc(p.name)}<small class="dependency-note">${esc(notes.get(p.id))}</small></span><div class="progress-track"><div class="progress-fill"></div></div><span class="download-state"></span>`;
       container.append(row);
       rows.set(p.id, row);
     }
-    setProgressText(row.querySelector('.dependency-note'), p.relationship || p.reason);
+    setProgressText(row.querySelector('.dependency-note'), notes.get(p.id));
     const text =
       updateMode === 'verifying'
         ? (['uninstall', 'cleanup', 'version-cleanup'].includes(operationKind) ? 'Verifying package registration…' : 'Verifying installed version…')

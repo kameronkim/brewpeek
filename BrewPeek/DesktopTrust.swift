@@ -6,6 +6,7 @@ extension DesktopApp {
     let control = beginPackagePreparation(requestID: requestID, operation: "trust")
     let destination = output
     DispatchQueue.global(qos: .userInitiated).async {
+      var securityToRefresh: SecuritySnapshotContext?
       do {
         let process = BrewProcess(brew: plan.brew)
         var trusted = false
@@ -21,6 +22,7 @@ extension DesktopApp {
           }
           let allowed = DispatchQueue.main.sync { () -> Bool in
             guard self.isCurrentPreparation(requestID) else { _ = self.finishPreparation(requestID); return false }
+            securityToRefresh = self.invalidateSecurityForTrustChange()
             self.operationPhase = .running
             self.preparationControl = nil
             self.sendUpdate(["kind": "trusting", "requestID": requestID])
@@ -39,11 +41,13 @@ extension DesktopApp {
         DispatchQueue.main.async {
           guard self.updateRequestID == requestID else { return }
           self.operationPhase = .idle
+          self.refreshSecurityAfterTrustChange(securityToRefresh, brew: plan.brew)
           self.prepareUpdate(keys: plan.keys, requestID: requestID, brew: plan.brew)
         }
       } catch {
         DispatchQueue.main.async {
-          self.finishPackageOperation(["kind":"error", "message":error.localizedDescription], requestID: requestID)
+          guard self.finishPackageOperation(["kind":"error", "message":error.localizedDescription], requestID: requestID) else { return }
+          self.refreshSecurityAfterTrustChange(securityToRefresh, brew: plan.brew)
         }
       }
     }
