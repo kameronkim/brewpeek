@@ -45,7 +45,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   var collectingInventory: Inventory?
   var securityInventory: Inventory?
   var securityContext: SecuritySnapshotContext?
-  var securityGeneration: UUID?
+  var securityGeneration: SecurityReportGeneration?
   var interruptedSecurityContext: SecuritySnapshotContext?
   var latestSecurityReport: (snapshotID: String, report: Record)?
   let securitySupportCache = FormulaSecurity.SupportCache()
