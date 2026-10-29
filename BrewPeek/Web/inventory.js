@@ -89,6 +89,9 @@ function field(label, content, wide = false) {
 }
 // Security findings come only from Homebrew's Formula scanner, independently of update availability.
 const formulaIdentity = name => name.replace(/^homebrew\/core\//, '');
+function hasMultipleInstalledVersions(p) {
+  return p.type === 'formula' && new Set(p.installedVersions || []).size > 1;
+}
 function securityFor(p) {
   return p.type === 'formula' ? securityFindings.get(formulaIdentity(key(p).slice(8))) : null;
 }
@@ -101,6 +104,7 @@ function securityDetail(p) {
   const id = formulaIdentity(key(p).slice(8));
   const includes = names => (names || []).some(name => formulaIdentity(name) === id);
   let notes = [];
+  if (hasMultipleInstalledVersions(p)) notes.push('Multiple versions are installed. Coverage is reported per Formula, not per installed version.');
   if (check.status === 'checking') notes.push('Checking Formula security information…');
   if (check.status === 'unsupported') notes.push('This Homebrew does not support vulnerability scan coverage JSON.');
   if (check.status === 'failed') notes.push('Security check failed. Any retained findings are unconfirmed.');
@@ -133,7 +137,8 @@ function renderSecurityNote() {
   else if (check.status === 'unsupported') text = 'Security check unavailable in this Homebrew version';
   else if (check.status === 'failed') text = report ? text + ' · Check failed; retained findings are unconfirmed' : 'Security check failed';
   else if (!check.complete) text += ' · Scan incomplete';
-  else text += ' · Homebrew reports complete coverage';
+  else text += ' · Homebrew reports complete Formula coverage';
+  if ((brewData.formulae || []).some(hasMultipleInstalledVersions)) text += ' · This does not confirm every installed version was scanned.';
   note.textContent = text + ' · Formulae only; Casks are not scanned. No safety guarantee.';
   note.title = [check.error, check.diagnostic].filter(Boolean).join('\n');
 }
