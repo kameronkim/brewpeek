@@ -16,6 +16,7 @@ const state = {
 };
 let allPackages = [];
 let securityFindings = new Map();
+let securityReviewCount = 0;
 let packageSearch = new Map();
 let sortedPackages = null;
 const $ = (id) => document.getElementById(id);
@@ -98,6 +99,10 @@ function securityFor(p) {
 }
 function needsSecurityReview(p) {
   return Boolean(securityFor(p)?.vulnerabilities?.length);
+}
+function updateSecurityFindings(check) {
+  securityFindings = new Map((check?.report?.findings || []).map(f => [formulaIdentity(f.formula), f]));
+  securityReviewCount = allPackages.filter(needsSecurityReview).length;
 }
 function securityDetail(p) {
   if (p.type !== 'formula') return '';
@@ -201,7 +206,7 @@ function section(type, items) {
 }
 function refreshSecurityFilter() {
   const button = $('security-filter');
-  const count = allPackages.filter(needsSecurityReview).length;
+  const count = securityReviewCount;
   // Keep the active filter available when a new report removes its last finding.
   button.hidden = count === 0 && state.filter !== 'security';
   button.textContent = `Security review ${count}`;
@@ -324,8 +329,8 @@ $('packages').addEventListener('click', (event) => {
 });
 window.setInventory = function (data) {
   brewData = data;
-  securityFindings = new Map((data.securityCheck?.report?.findings || []).map(f => [formulaIdentity(f.formula), f]));
   allPackages = [...data.formulae, ...data.casks];
+  updateSecurityFindings(data.securityCheck);
   // Snapshot replacement also invalidates cached metadata and package order.
   packageSearch = new Map(
     allPackages.map((p) => [
@@ -383,7 +388,7 @@ window.setSecurityCheck = function (report, snapshotID) {
   if (brewData?.snapshotID !== snapshotID) return;
   const view = captureInventoryView();
   brewData.securityCheck = report;
-  securityFindings = new Map((report.report?.findings || []).map(f => [formulaIdentity(f.formula), f]));
+  updateSecurityFindings(report);
   renderSecurityNote();
   refreshSecurityFilter();
   const visible = new Set([...document.querySelectorAll('.package-row')].map(row => row.dataset.key));
