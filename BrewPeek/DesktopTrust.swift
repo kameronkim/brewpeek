@@ -23,8 +23,8 @@ extension DesktopApp {
           let allowed = DispatchQueue.main.sync { () -> Bool in
             guard self.isCurrentPreparation(requestID) else { _ = self.finishPreparation(requestID); return false }
             securityToRefresh = self.invalidateSecurityForTrustChange()
-            self.operationPhase = .running
-            self.preparationControl = nil
+            self.operation.phase = .running
+            self.operation.control = nil
             self.sendUpdate(["kind": "trusting", "requestID": requestID])
             return true
           }
@@ -39,8 +39,8 @@ extension DesktopApp {
         }
         guard trusted else { return }
         DispatchQueue.main.async {
-          guard self.updateRequestID == requestID else { return }
-          self.operationPhase = .idle
+          guard self.operation.requestID == requestID else { return }
+          self.operation.phase = .idle
           self.refreshSecurityAfterTrustChange(securityToRefresh, brew: plan.brew)
           self.prepareUpdate(keys: plan.keys, requestID: requestID, brew: plan.brew)
         }

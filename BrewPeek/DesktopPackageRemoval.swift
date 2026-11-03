@@ -98,7 +98,7 @@ extension DesktopApp {
     recoveryChecked = true
     auxiliaryBusy = true
     let control = UpgradePreparation()
-    preparationControl = control
+    operation.control = control
     sendUpdate(["kind": "recoveryChecking"])
     let destination = output
     DispatchQueue.global(qos: .userInitiated).async {
@@ -112,8 +112,8 @@ extension DesktopApp {
         }
       }
       DispatchQueue.main.async {
-        guard self.preparationControl === control else { return }
-        self.preparationControl = nil
+        guard self.operation.control === control else { return }
+        self.operation.control = nil
         self.auxiliaryBusy = false
         switch result {
         case .success(let record): self.sendUpdate(record ?? ["kind": "recoveryEmpty"])
@@ -185,9 +185,9 @@ extension DesktopApp {
   }
 
   func discardSavedCleanup(id: String, requestID: String) {
-    lastWebOperationKind = "cleanup-discard"
+    webRecovery.operationKind = "cleanup-discard"
     auxiliaryBusy = true
-    updateRequestID = requestID
+    operation.requestID = requestID
     let destination = output
     DispatchQueue.global(qos: .userInitiated).async {
       do {
@@ -196,13 +196,13 @@ extension DesktopApp {
         }
         DispatchQueue.main.async {
           self.auxiliaryBusy = false
-          self.updateRequestID = nil
+          self.operation.requestID = nil
           self.sendUpdate(["kind": "cleanupDiscarded", "requestID": requestID])
         }
       } catch {
         DispatchQueue.main.async {
           self.auxiliaryBusy = false
-          self.updateRequestID = nil
+          self.operation.requestID = nil
           self.sendUpdate([
             "kind": "error", "operation": "cleanup-discard",
             "message": error.localizedDescription, "requestID": requestID,
