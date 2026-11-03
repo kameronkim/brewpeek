@@ -352,13 +352,45 @@ window.setInventory = function (data) {
   render();
 };
 
-// Only patch security information; preserve package selection, filters, focus and scroll.
+// Patch security content in place unless the selected filter's membership changes.
+function patchSecurityRows() {
+  const packages = new Map(allPackages.map(p => [key(p), p]));
+  for (const row of document.querySelectorAll('.package-row')) {
+    const p = packages.get(row.dataset.key);
+    if (!p || p.type !== 'formula') continue;
+    const button = row.querySelector('.package-button');
+    const label = button.querySelector('.security-label');
+    if (needsSecurityReview(p) && !label) {
+      const badge = document.createElement('span');
+      badge.className = 'security-label';
+      badge.textContent = 'SECURITY REVIEW';
+      button.insertBefore(badge, button.querySelector('.sr-only'));
+    } else if (!needsSecurityReview(p)) label?.remove();
+    const detailRow = row.nextElementSibling;
+    if (detailRow.hidden) continue;
+    const fields = detailRow.querySelector('dl');
+    const previous = [...fields.querySelectorAll('.detail-field')].find(
+      field => field.querySelector('dt').textContent === 'SECURITY · HOMEBREW'
+    );
+    const content = securityDetail(p);
+    if (previous) {
+      if (content) previous.outerHTML = content;
+      else previous.remove();
+    } else if (content) fields.insertAdjacentHTML('beforeend', content);
+  }
+}
 window.setSecurityCheck = function (report, snapshotID) {
   if (brewData?.snapshotID !== snapshotID) return;
   const view = captureInventoryView();
   brewData.securityCheck = report;
   securityFindings = new Map((report.report?.findings || []).map(f => [formulaIdentity(f.formula), f]));
   renderSecurityNote();
-  render();
+  refreshSecurityFilter();
+  const visible = new Set([...document.querySelectorAll('.package-row')].map(row => row.dataset.key));
+  const filtered = state.filter === 'security'
+    ? allPackages.filter(p => matches(p, state.query.trim().toLowerCase())) : null;
+  if (filtered && (filtered.length !== visible.size || filtered.some(p => !visible.has(key(p)))))
+    render();
+  else patchSecurityRows();
   restoreInventoryView(view);
 };
