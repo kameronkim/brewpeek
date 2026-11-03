@@ -27,12 +27,10 @@ bulk.textContent = 'Update all';
 bulk.id = 'update-all';
 bulk.hidden = true;
 document.querySelector('.filter-actions').insertBefore(bulk, $('refresh'));
-const inventoryRender = render;
-render = function () {
-  inventoryRender();
+function syncPackageActions() {
   bulk.hidden = !allPackages.some((p) => p.availableVersion);
   syncActionAvailability();
-};
+}
 function syncActionAvailability() {
   const unavailable = updateBusy() || inventoryRefreshState !== 'idle';
   bulk.disabled = unavailable;

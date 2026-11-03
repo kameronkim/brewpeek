@@ -211,8 +211,15 @@ function refreshSecurityFilter() {
   button.hidden = count === 0 && state.filter !== 'security';
   button.textContent = `Security review ${count}`;
 }
-function render() {
+function refreshInventoryControls() {
   refreshSecurityFilter();
+  syncPackageActions();
+}
+function render() {
+  renderPackageList();
+  refreshInventoryControls();
+}
+function renderPackageList() {
   if (
     !sortedPackages ||
     sortedPackages.sort !== state.sort ||
@@ -327,7 +334,8 @@ $('packages').addEventListener('click', (event) => {
     syncActionAvailability();
   }
 });
-window.setInventory = function (data) {
+window.setInventory = function (data, { preserveView = true } = {}) {
+  const view = preserveView ? captureInventoryView() : null;
   brewData = data;
   allPackages = [...data.formulae, ...data.casks];
   updateSecurityFindings(data.securityCheck);
@@ -355,6 +363,8 @@ window.setInventory = function (data) {
     category.value = 'all';
   }
   render();
+  refreshInventoryStatus();
+  if (view) restoreInventoryView(view);
 };
 
 // Patch security content in place unless the selected filter's membership changes.
@@ -390,12 +400,14 @@ window.setSecurityCheck = function (report, snapshotID) {
   brewData.securityCheck = report;
   updateSecurityFindings(report);
   renderSecurityNote();
-  refreshSecurityFilter();
   const visible = new Set([...document.querySelectorAll('.package-row')].map(row => row.dataset.key));
   const filtered = state.filter === 'security'
     ? allPackages.filter(p => matches(p, state.query.trim().toLowerCase())) : null;
   if (filtered && (filtered.length !== visible.size || filtered.some(p => !visible.has(key(p)))))
     render();
-  else patchSecurityRows();
+  else {
+    patchSecurityRows();
+    refreshInventoryControls();
+  }
   restoreInventoryView(view);
 };
