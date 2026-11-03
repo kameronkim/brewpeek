@@ -99,6 +99,8 @@ final class Inventory {
     env["HOMEBREW_NO_API_AUTO_UPDATE"] = "1"
     env["HOMEBREW_NO_ANALYTICS"] = "1"
     env["HOMEBREW_NO_UPDATE_CLEANUP"] = "1"
+    // Keep background inspection under the same explicit trust policy as package operations.
+    env.removeValue(forKey: "HOMEBREW_NO_REQUIRE_TAP_TRUST")
     env["PATH"] =
       URL(fileURLWithPath: brew).deletingLastPathComponent().path + ":/usr/bin:/bin:/usr/sbin:/sbin"
     task.environment = env

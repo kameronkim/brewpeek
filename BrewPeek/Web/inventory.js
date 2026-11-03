@@ -16,6 +16,7 @@ const state = {
 };
 let allPackages = [];
 let securityFindings = new Map();
+let securityReviewCount = 0;
 let packageSearch = new Map();
 let sortedPackages = null;
 const $ = (id) => document.getElementById(id);
@@ -70,6 +71,7 @@ function matches(p, query) {
     (state.category === 'all' || p.category === state.category) &&
     (state.filter === 'all' ||
       (state.filter === 'updates' && Boolean(p.availableVersion)) ||
+      (state.filter === 'security' && needsSecurityReview(p)) ||
       state.filter === p.type ||
       (state.filter === 'leaf' && p.type === 'formula' && p.leaf) ||
       (state.filter === 'dependency' && p.type === 'formula' && !p.leaf) ||
@@ -94,6 +96,13 @@ function hasMultipleInstalledVersions(p) {
 }
 function securityFor(p) {
   return p.type === 'formula' ? securityFindings.get(formulaIdentity(key(p).slice(8))) : null;
+}
+function needsSecurityReview(p) {
+  return Boolean(securityFor(p)?.vulnerabilities?.length);
+}
+function updateSecurityFindings(check) {
+  securityFindings = new Map((check?.report?.findings || []).map(f => [formulaIdentity(f.formula), f]));
+  securityReviewCount = allPackages.filter(needsSecurityReview).length;
 }
 function securityDetail(p) {
   if (p.type !== 'formula') return '';
@@ -185,7 +194,7 @@ function detail(p) {
 function row(p) {
   const id = 'detail-' + encodeURIComponent(key(p)),
     open = state.expanded.has(key(p));
-  return `<tr class="package-row" data-key="${esc(key(p))}"><td><button class="package-button" aria-expanded="${open}" aria-controls="${esc(id)}"><span class="chevron" aria-hidden="true">${open ? '−' : '+'}</span><span class="package-name">${highlighted(p.name)}</span>${p.deprecated === true ? '<span class="deprecated-label">DEPRECATED</span>' : ''}${securityFor(p)?.vulnerabilities?.length ? '<span class="security-label">SECURITY REVIEW</span>' : ''}<span class="sr-only"> details</span></button><p class="description">${highlighted(p.type === 'cask' ? [p.displayName, p.description].filter(Boolean).join(' · ') : p.description)}</p></td><td class="version"><div class="version-content"><span class="installed-value" title="${esc(p.version)}">${esc(p.version)}</span>${p.availableVersion ? `<span class="available-version"><span class="available-value" title="${esc(p.availableVersion)}">Available: ${esc(p.availableVersion)}</span></span><button class="update-btn row-update" data-update="${esc(key(p))}">Update</button>` : ''}</div></td>${p.type === 'formula' ? `<td><span class="status ${p.leaf ? 'leaf' : ''}">${status(p)}</span>${p.direct ? '<span class="direct-label">DIRECT</span>' : ''}</td>` : ''}</tr><tr class="detail-row" id="${esc(id)}" ${open ? '' : 'hidden'}><td colspan="${p.type === 'formula' ? 3 : 2}">${open ? detail(p) : ''}</td></tr>`;
+  return `<tr class="package-row" data-key="${esc(key(p))}"><td><button class="package-button" aria-expanded="${open}" aria-controls="${esc(id)}"><span class="chevron" aria-hidden="true">${open ? '−' : '+'}</span><span class="package-name">${highlighted(p.name)}</span>${p.deprecated === true ? '<span class="deprecated-label">DEPRECATED</span>' : ''}${needsSecurityReview(p) ? '<span class="security-label">SECURITY REVIEW</span>' : ''}<span class="sr-only"> details</span></button><p class="description">${highlighted(p.type === 'cask' ? [p.displayName, p.description].filter(Boolean).join(' · ') : p.description)}</p></td><td class="version"><div class="version-content"><span class="installed-value" title="${esc(p.version)}">${esc(p.version)}</span>${p.availableVersion ? `<span class="available-version"><span class="available-value" title="${esc(p.availableVersion)}">Available: ${esc(p.availableVersion)}</span></span><button class="update-btn row-update" data-update="${esc(key(p))}">Update</button>` : ''}</div></td>${p.type === 'formula' ? `<td><span class="status ${p.leaf ? 'leaf' : ''}">${status(p)}</span>${p.direct ? '<span class="direct-label">DIRECT</span>' : ''}</td>` : ''}</tr><tr class="detail-row" id="${esc(id)}" ${open ? '' : 'hidden'}><td colspan="${p.type === 'formula' ? 3 : 2}">${open ? detail(p) : ''}</td></tr>`;
 }
 function countLabel(count, total) {
   return count === total ? `${count} total` : `${count} of ${total}`;
@@ -195,7 +204,15 @@ function section(type, items) {
     total = type === 'formula' ? brewData.formulae.length : brewData.casks.length;
   return `<section class="section" id="${type}"><table class="package-table ${type}" aria-label="${title}"><colgroup>${(type === 'formula' ? [54, 26, 20] : [54, 46]).map((width) => `<col style="width:${width}%">`).join('')}</colgroup><thead><tr class="section-heading-row"><th colspan="${type === 'formula' ? 3 : 2}"><div class="section-title"><h2>${title}</h2><span class="count">${countLabel(items.length, total)}</span></div></th></tr><tr class="sort-heading-row">${(type === 'formula' ? ['name', 'version', 'status'] : ['name', 'version']).map((col) => `<th scope="col" aria-sort="${state.sort === col ? (state.direction === 'asc' ? 'ascending' : 'descending') : 'none'}"><button data-sort="${col}">${col.toUpperCase()} ${state.sort === col ? (state.direction === 'asc' ? '↑' : '↓') : '↕'}</button></th>`).join('')}</tr></thead><tbody>${items.map(row).join('')}</tbody></table>${items.length ? '' : '<p class="empty">No matching packages.</p>'}</section>`;
 }
+function refreshSecurityFilter() {
+  const button = $('security-filter');
+  const count = securityReviewCount;
+  // Keep the active filter available when a new report removes its last finding.
+  button.hidden = count === 0 && state.filter !== 'security';
+  button.textContent = `Security review ${count}`;
+}
 function render() {
+  refreshSecurityFilter();
   if (
     !sortedPackages ||
     sortedPackages.sort !== state.sort ||
@@ -212,7 +229,7 @@ function render() {
   const visibleTypes =
     state.filter === 'cask'
       ? ['cask']
-      : ['formula', 'leaf', 'dependency', 'direct'].includes(state.filter)
+      : ['formula', 'security', 'leaf', 'dependency', 'direct'].includes(state.filter)
         ? ['formula']
         : ['formula', 'cask'];
   $('packages').innerHTML = visibleTypes
@@ -312,8 +329,8 @@ $('packages').addEventListener('click', (event) => {
 });
 window.setInventory = function (data) {
   brewData = data;
-  securityFindings = new Map((data.securityCheck?.report?.findings || []).map(f => [formulaIdentity(f.formula), f]));
   allPackages = [...data.formulae, ...data.casks];
+  updateSecurityFindings(data.securityCheck);
   // Snapshot replacement also invalidates cached metadata and package order.
   packageSearch = new Map(
     allPackages.map((p) => [
@@ -340,13 +357,45 @@ window.setInventory = function (data) {
   render();
 };
 
-// Only patch security information; preserve package selection, filters, focus and scroll.
+// Patch security content in place unless the selected filter's membership changes.
+function patchSecurityRows() {
+  const packages = new Map(allPackages.map(p => [key(p), p]));
+  for (const row of document.querySelectorAll('.package-row')) {
+    const p = packages.get(row.dataset.key);
+    if (!p || p.type !== 'formula') continue;
+    const button = row.querySelector('.package-button');
+    const label = button.querySelector('.security-label');
+    if (needsSecurityReview(p) && !label) {
+      const badge = document.createElement('span');
+      badge.className = 'security-label';
+      badge.textContent = 'SECURITY REVIEW';
+      button.insertBefore(badge, button.querySelector('.sr-only'));
+    } else if (!needsSecurityReview(p)) label?.remove();
+    const detailRow = row.nextElementSibling;
+    if (detailRow.hidden) continue;
+    const fields = detailRow.querySelector('dl');
+    const previous = [...fields.querySelectorAll('.detail-field')].find(
+      field => field.querySelector('dt').textContent === 'SECURITY · HOMEBREW'
+    );
+    const content = securityDetail(p);
+    if (previous) {
+      if (content) previous.outerHTML = content;
+      else previous.remove();
+    } else if (content) fields.insertAdjacentHTML('beforeend', content);
+  }
+}
 window.setSecurityCheck = function (report, snapshotID) {
   if (brewData?.snapshotID !== snapshotID) return;
   const view = captureInventoryView();
   brewData.securityCheck = report;
-  securityFindings = new Map((report.report?.findings || []).map(f => [formulaIdentity(f.formula), f]));
+  updateSecurityFindings(report);
   renderSecurityNote();
-  render();
+  refreshSecurityFilter();
+  const visible = new Set([...document.querySelectorAll('.package-row')].map(row => row.dataset.key));
+  const filtered = state.filter === 'security'
+    ? allPackages.filter(p => matches(p, state.query.trim().toLowerCase())) : null;
+  if (filtered && (filtered.length !== visible.size || filtered.some(p => !visible.has(key(p)))))
+    render();
+  else patchSecurityRows();
   restoreInventoryView(view);
 };
