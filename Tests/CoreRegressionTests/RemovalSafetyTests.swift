@@ -2,7 +2,7 @@ import Foundation
 import XCTest
 @testable import BrewPeek
 
-/// Characterizes the current gap and regression-checks a proposal without changing product code.
+/// Regression-checks the product projection and execution path against pinned Homebrew helpers.
 /// The upstream Ruby algorithms are pinned; all installed packages and receipts are doubles.
 final class RemovalSafetyTests: XCTestCase {
   private struct Projection {
@@ -12,7 +12,7 @@ final class RemovalSafetyTests: XCTestCase {
   }
 
   private func run(_ scenario: String, afterSelection: Bool = false,
-                   proposed: Bool = false, capability: String = "supported", scope: [String]? = nil) throws -> Projection {
+                   capability: String = "supported") throws -> Projection {
     let folder = "Fixtures/HomebrewAutoremove"
     let fixture = try XCTUnwrap(Bundle.module.url(forResource: "projection_fixture", withExtension: "rb", subdirectory: folder))
     let workspace = try CoreWorkspace()
@@ -21,23 +21,8 @@ final class RemovalSafetyTests: XCTestCase {
       request["scope"] = scenario == "outside-scope" || scenario == "selected-formula" ? ["cmake"]
         : scenario == "chain" ? ["bar", "mid", "cmake"] : ["bar", "cmake"]
     }
-    if let scope { request["scope"] = scope }
     let encoded = try JSONSerialization.data(withJSONObject: request).base64EncodedString()
-    var script = PackageRemoval.dependencyScript.replacingOccurrences(of: "PAYLOAD", with: "\"" + encoded + "\"")
-    if proposed {
-      // Proposed change only: preserve the complete installed set (including cleanup
-      // exclusions), minus the explicitly selected Formula. Unsupported API => no deps.
-      let anchor = "names = removable.map(&:full_name).sort"
-      XCTAssertTrue(script.contains(anchor))
-      script = script.replacingOccurrences(of: anchor, with: #"""
-        removable = if Utils::Autoremove.respond_to?(:formulae_safe_to_remove)
-          Utils::Autoremove.formulae_safe_to_remove(removable, Formula.installed - [selected_formula])
-        else
-          []
-        end
-        names = removable.map(&:full_name).sort
-        """#)
-    }
+    let script = PackageRemoval.dependencyScript.replacingOccurrences(of: "PAYLOAD", with: "\"" + encoded + "\"")
     try workspace.write("projection.rb", script)
     let task = Process(), stdout = Pipe(), stderr = Pipe()
     task.executableURL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["BREWPEEK_TEST_RUBY"] ?? "/usr/bin/ruby")
@@ -52,66 +37,89 @@ final class RemovalSafetyTests: XCTestCase {
                       diagnostic: String(decoding: error, as: UTF8.self))
   }
 
-  func testKeptSourceBuildDependenciesExposeGapAndProposedPassProtectsThem() throws {
+  func testKeptSourceBuildDependenciesAreProtected() throws {
     for scenario in ["cask-kept", "pinned", "cleanup-excluded", "outside-scope"] {
       for after in [false, true] {
-        let current = try run(scenario, afterSelection: after)
-        XCTAssertEqual(current.status, 0, current.diagnostic)
-        XCTAssertEqual(current.dependencies, ["cmake"], "\(scenario), after=\(after): current projection includes a build dependency of a kept Formula")
-        let proposal = try run(scenario, afterSelection: after, proposed: true)
-        XCTAssertEqual(proposal.status, 0, proposal.diagnostic)
-        XCTAssertEqual(proposal.dependencies, [], "\(scenario), after=\(after)")
+        let result = try run(scenario, afterSelection: after)
+        XCTAssertEqual(result.status, 0, result.diagnostic)
+        XCTAssertEqual(result.dependencies, [], "\(scenario), after=\(after)")
       }
     }
   }
 
   func testSafetyPassRepeatsForDependenciesOfNewlyKeptCandidates() throws {
     for after in [false, true] {
-      XCTAssertEqual(try run("chain", afterSelection: after).dependencies, ["cmake", "mid"])
-      XCTAssertEqual(try run("chain", afterSelection: after, proposed: true).dependencies, [])
+      XCTAssertEqual(try run("chain", afterSelection: after).dependencies, [])
     }
   }
 
   func testExistingRuntimeProtectionAndOrdinaryRemovalRemainUnchanged() throws {
     for (scenario, expected) in [("runtime", [String]()), ("bottle", ["cmake"]), ("unused", ["bar", "cmake"])] {
       for after in [false, true] {
-        for proposed in [false, true] {
-          let result = try run(scenario, afterSelection: after, proposed: proposed)
-          XCTAssertEqual(result.status, 0, result.diagnostic)
-          XCTAssertEqual(result.dependencies, expected, "\(scenario), after=\(after), proposed=\(proposed)")
-        }
+        let result = try run(scenario, afterSelection: after)
+        XCTAssertEqual(result.status, 0, result.diagnostic)
+        XCTAssertEqual(result.dependencies, expected, "\(scenario), after=\(after)")
       }
     }
   }
 
   func testExplicitlySelectedFormulaIsNotTreatedAsKept() throws {
     for after in [false, true] {
-      let result = try run("selected-formula", afterSelection: after, proposed: true)
+      let result = try run("selected-formula", afterSelection: after)
       XCTAssertEqual(result.status, 0, result.diagnostic)
       XCTAssertEqual(result.dependencies, ["cmake"])
     }
   }
 
-  func testSafetyPassMustSeeFinalScopeAfterReceiptFilteringKeepsAFormula() throws {
-    let initial = try run("unused", afterSelection: true, proposed: true)
-    XCTAssertEqual(initial.status, 0, initial.diagnostic)
-    XCTAssertEqual(initial.dependencies, ["bar", "cmake"])
-    // Execution currently drops changed receipts *after* projecting eligibility.
-    // If bar is then kept, filtering that result alone still leaves cmake.
-    XCTAssertEqual(initial.dependencies?.filter { $0 != "bar" }, ["cmake"])
-    let final = try run("unused", afterSelection: true, proposed: true, scope: ["cmake"])
-    XCTAssertEqual(final.status, 0, final.diagnostic)
-    XCTAssertEqual(final.dependencies, [], "Recompute against the actual final removal set")
+  func testExecutionChecksReceiptMatchedScopeBeforeRemovingDependencies() throws {
+    let fixture = try XCTUnwrap(Bundle.module.url(forResource: "projection_fixture", withExtension: "rb", subdirectory: "Fixtures/HomebrewAutoremove"))
+    for capability in ["supported", "missing", "broken"] {
+      let f = try RemovalFixture(dependencies: true)
+      func formula(_ name: String, receipt: Int = 1) -> Record {
+        var record = RemovalFixture.dependency(receipt: receipt)
+        record["name"] = name; record["full_name"] = name
+        return record
+      }
+      try f.workspace.json("before.json", ["formulae": [formula("bar"), formula("cmake")], "casks": [RemovalFixture.cask(dependencies: true)]])
+      try f.workspace.json("before-plan.json", ["dependencies": ["bar", "cmake"], "blocked": [String]()])
+      let plan = try f.removal.prepare(key: f.key)
+      // bar changed since confirmation and must stay; its build dependency cmake
+      // is unchanged. The *actual* Swift execution must narrow the Ruby scope first.
+      let remaining: Record = ["formulae": [formula("bar", receipt: 2), formula("cmake")], "casks": [Record]()]
+      try f.workspace.json("middle.json", remaining)
+      try f.workspace.json("after.json", remaining)
+      try f.workspace.write("fixture-path", fixture.path)
+      try f.workspace.write("capability", capability)
+      let path = f.workspace.url("brew-fixture")
+      let script = try String(contentsOf: path, encoding: .utf8)
+      let anchor = "if test -f done; then cat after-plan.json; else cat before-plan.json; fi"
+      XCTAssertTrue(script.contains(anchor))
+      try f.workspace.write("brew-fixture", script.replacingOccurrences(of: anchor, with: #"""
+        if test -f done; then
+          printf '%s' "$3" > execution-projection.rb
+          exec "${BREWPEEK_TEST_RUBY:-/usr/bin/ruby}" "$(cat fixture-path)" unused after "$(cat capability)" "$PWD/execution-projection.rb"
+        else cat before-plan.json; fi
+        """#))
+      let result = try f.removal.execute(plan) { _ in }
+      let rows = try XCTUnwrap(result["packages"] as? [Record])
+      XCTAssertEqual(rows.first?["outcome"] as? String, "uninstalled")
+      XCTAssertFalse(f.workspace.commands.contains { $0.hasPrefix("uninstall --formula") }, capability)
+      if capability == "broken" {
+        XCTAssertTrue((result["details"] as? String)?.contains("fixture safety API failure") == true)
+      } else {
+        XCTAssertTrue(rows.dropFirst().allSatisfy { $0["outcome"] as? String == "kept" })
+      }
+    }
   }
 
   func testUnavailableSafetyAPIDoesNotFallBackToUnsafeCandidates() throws {
-    let result = try run("cask-kept", proposed: true, capability: "missing")
+    let result = try run("cask-kept", capability: "missing")
     XCTAssertEqual(result.status, 0, result.diagnostic)
     XCTAssertEqual(result.dependencies, [])
   }
 
   func testSafetyAPIExecutionFailureDoesNotReturnCandidates() throws {
-    let result = try run("cask-kept", proposed: true, capability: "broken")
+    let result = try run("cask-kept", capability: "broken")
     XCTAssertNotEqual(result.status, 0)
     XCTAssertNil(result.dependencies)
     XCTAssertTrue(result.diagnostic.contains("fixture safety API failure"))

@@ -11,5 +11,6 @@ projection_fixture.rb supplies in-memory Formula/Cask/receipt objects only.
 It executes these real upstream algorithms plus the application's Ruby projection.
 Formula#missing_dependencies is modeled as receipt runtime dependency lookup;
 this does not exercise real keg paths, stale filesystem metadata, or uninstall.
-Tests compare current behavior with a test-only proposed final safety pass.
-The product code is intentionally unchanged pending review of that proposal.
+Tests execute the product projection without source replacement. The execution
+case also runs PackageRemoval.execute with fake metadata and command scripts;
+only disposable marker files stand in for actual uninstall operations.

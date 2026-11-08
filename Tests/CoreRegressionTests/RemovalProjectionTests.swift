@@ -41,6 +41,10 @@ final class RemovalProjectionTests: XCTestCase {
       end
       module Utils
         module Autoremove
+          def self.formulae_safe_to_remove(removable, installed)
+            raise "cleanup exclusion missing from final safety set" unless installed.any? { |f| f.name == "unused" } || !ENV.key?("PROTECT_UNUSED")
+            removable
+          end
           def self.removable_formulae(formulae, casks)
             raise "selected Cask not excluded" if formulae.any? { |f| f.name == "unused" } && !casks.empty?
             formulae
