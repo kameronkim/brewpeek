@@ -18,7 +18,8 @@ let package = Package(
     .testTarget(
       name: "CoreRegressionTests",
       dependencies: ["BrewPeek"],
-      path: "Tests/CoreRegressionTests"
+      path: "Tests/CoreRegressionTests",
+      resources: [.copy("Fixtures")]
     ),
     .testTarget(
       name: "SecurityRegressionTests",
