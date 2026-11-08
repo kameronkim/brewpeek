@@ -10,7 +10,7 @@ final class UpgradeExecutionTests: XCTestCase {
     let ssl = try XCTUnwrap(plan.packages.first { $0.name == "ssl" })
     XCTAssertTrue(ssl.current.isEmpty); XCTAssertEqual(ssl.relationship,"Required by node")
     XCTAssertTrue(try XCTUnwrap(plan.packages.first { $0.name == "node" }).relationship.isEmpty)
-    XCTAssertEqual(plan.selected[0].argument,"homebrew/core/node")
+    XCTAssertEqual(plan.selected.first?.argument,"homebrew/core/node")
     XCTAssertTrue(f.workspace.commands.contains("upgrade --dry-run --no-ask homebrew/core/node"))
     var events:[Record]=[]
     let rows = try XCTUnwrap(f.engine.execute(plan) { events.append($0) }["packages"] as? [Record])

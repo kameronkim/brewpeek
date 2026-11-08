@@ -64,7 +64,7 @@ final class PackageRemovalTests: XCTestCase {
       let f = try RemovalFixture(dependencies:true), plan = try f.removal.prepare(key:f.key)
       try f.workspace.json("after-plan.json",["dependencies":changed ? ["unused"]:[],"blocked":[]])
       if changed { try f.workspace.json("middle.json",["formulae":[RemovalFixture.dependency(version:"2",receipt:2)],"casks":[]]) }
-      XCTAssertEqual(try rows(f.removal.execute(plan) { _ in })[1]["outcome"] as? String,"kept")
+      XCTAssertEqual(try rows(f.removal.execute(plan) { _ in }).dropFirst().first?["outcome"] as? String,"kept")
       XCTAssertFalse(f.workspace.commands.contains { $0.hasPrefix("uninstall --formula") })
     }
   }
@@ -90,8 +90,8 @@ final class PackageRemovalTests: XCTestCase {
     try f.workspace.json("middle.json",["formulae":[RemovalFixture.rootFormula(),RemovalFixture.dependency()],"casks":[]])
     try f.workspace.write("status","1")
     let result = try rows(f.removal.execute(plan) { _ in })
-    XCTAssertEqual(result[0]["message"] as? String,"Still registered as installed. Review activity and retry.")
-    XCTAssertEqual(result[1]["message"] as? String,"Dependency removal did not start. Review activity.")
+    XCTAssertEqual(result.first?["message"] as? String,"Still registered as installed. Review activity and retry.")
+    XCTAssertEqual(result.dropFirst().first?["message"] as? String,"Dependency removal did not start. Review activity.")
   }
 
   func testDependencyOnlyPinnedAndRequiredFormulaeAreRejected() throws {

@@ -14,7 +14,7 @@ private final class RecoveryFixture {
     let w = try CoreWorkspace(); workspace = w
     let info:Record = ["formulae":[Self.formula("root"),Self.formula("parent"),Self.formula("child")],"casks":[]]
     let installed = Upgrade.packages(try Inventory.validateInstalledInfo(info))
-    task = RemovalTask(PackageRemovalPlan(package:installed[0],dependencies:Array(installed.dropFirst())))
+    task = RemovalTask(PackageRemovalPlan(package:try XCTUnwrap(installed.first),dependencies:Array(installed.dropFirst())))
     try RemovalTaskStore.save(task,at:w.url("inventory.json"))
     try w.json("info.json",["formulae":[Self.formula("parent"),Self.formula("child")],"casks":[]])
     try w.json("plan.json",["dependencies":["parent","child"],"blocked":[]])
@@ -36,7 +36,7 @@ final class CleanupRecoveryTests: XCTestCase {
   func testPersistenceAndRecoveryDoNotResumeCommandsAutomatically() throws {
     let f = try RecoveryFixture(), loaded = try XCTUnwrap(RemovalTaskStore.load(at:f.destination))
     XCTAssertEqual(loaded.id,f.task.id)
-    XCTAssertEqual(loaded.dependencies[0].receipt,f.task.dependencies[0].receipt)
+    XCTAssertEqual(loaded.dependencies.first?.receipt,f.task.dependencies.first?.receipt)
     XCTAssertEqual(try f.removal.recoveryResult(loaded)["pendingCleanup"] as? Bool,true)
     XCTAssertFalse(f.workspace.commands.contains { $0.hasPrefix("uninstall") })
     XCTAssertEqual(try f.removal.prepareCleanup(loaded).packages.count,2)
