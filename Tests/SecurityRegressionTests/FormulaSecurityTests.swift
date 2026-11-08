@@ -86,4 +86,29 @@ final class FormulaSecurityTests: XCTestCase {
     XCTAssertEqual((loaded["securityCheck"] as? Record)?["status"] as? String, "failed")
     XCTAssertEqual(loaded["snapshotID"] as? String, "snapshot-A")
   }
+  func testCheckedBooleanAndMalformedFindingArraysAreRejected() throws {
+    var report = try SecurityFixture.report("complete-empty")
+    report["checked"] = true
+    XCTAssertFalse(FormulaSecurity.validReport(report))
+    report = try SecurityFixture.report("complete-open")
+    var finding = try XCTUnwrap((report["findings"] as? [Record])?.first)
+    finding["vulnerabilities"] = ["wrong"]
+    report["findings"] = [finding]
+    XCTAssertFalse(FormulaSecurity.validReport(report))
+  }
+
+  func testTapNamesRemainDistinctButOfficialAliasesCannotDuplicateFindings() throws {
+    var report = try SecurityFixture.report("complete-open")
+    let tapped = try XCTUnwrap((report["findings"] as? [Record])?.first)
+    var core = tapped
+    core["formula"] = "homebrew/core/alpha"
+    report["checked"] = 2
+    report["findings"] = [tapped,core]
+    XCTAssertTrue(FormulaSecurity.validReport(report))
+    var duplicate = core
+    duplicate["formula"] = "alpha"
+    report["findings"] = [core,duplicate]
+    XCTAssertFalse(FormulaSecurity.validReport(report))
+  }
+
 }
