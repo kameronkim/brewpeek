@@ -1,0 +1,10 @@
+{
+  "checked": 1,
+  "complete": false,
+  "findings": [],
+  "skipped_formulae": [
+    "beta"
+  ],
+  "outdated_without_sbom": [],
+  "unscanned_formulae": {}
+}

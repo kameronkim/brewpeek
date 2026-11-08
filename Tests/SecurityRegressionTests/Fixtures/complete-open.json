@@ -1,0 +1,27 @@
+{
+  "checked": 1,
+  "complete": true,
+  "findings": [
+    {
+      "formula": "vendor/tools/alpha",
+      "version": "1.0",
+      "vulnerabilities": [
+        {
+          "id": "CVE-FIXTURE-0001",
+          "severity": "HIGH",
+          "summary": "Synthetic test finding",
+          "aliases": [
+            "GHSA-fixture"
+          ],
+          "fixed_versions": [
+            "2.0"
+          ]
+        }
+      ],
+      "patched": []
+    }
+  ],
+  "skipped_formulae": [],
+  "outdated_without_sbom": [],
+  "unscanned_formulae": {}
+}

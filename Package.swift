@@ -15,6 +15,12 @@ let package = Package(
       exclude: ["Askpass", "Resources", "Web"],
       swiftSettings: [.unsafeFlags(["-Osize"], .when(configuration: .release))]
     ),
+    .testTarget(
+      name: "SecurityRegressionTests",
+      dependencies: ["BrewPeek"],
+      path: "Tests/SecurityRegressionTests",
+      resources: [.copy("Fixtures")]
+    ),
     .executableTarget(
       name: "BrewPeekAskpass",
       path: "BrewPeek/Askpass",

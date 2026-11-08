@@ -5,8 +5,11 @@
 
 # Local development files
 /Makefile
-/Tests/
 /Tools/
+
+# Keep ad hoc checks local; include the SwiftPM security regression suite
+/Tests/*
+!/Tests/SecurityRegressionTests/
 
 # macOS metadata
 .DS_Store
