@@ -70,7 +70,7 @@ extension DesktopApp {
 
   /// Security work owns no mutation/refresh UI state. Its only write is a guarded snapshot patch.
   func startSecurityRefresh(_ snapshot: Record, using suppliedInventory: Inventory? = nil, at suppliedDestination: URL? = nil) {
-    guard !terminating, operationPhase != .running, inventoryRefreshState != "refreshing",
+    guard !terminating, operation.phase != .running, inventoryRefreshState != "refreshing",
       let snapshotID = snapshot["snapshotID"] as? String,
       securityContext?.id == snapshotID else { return }
     if let latest = latestSecurityReport, latest.snapshotID == snapshotID {
@@ -149,7 +149,7 @@ extension DesktopApp {
   }
 
   private func deliverSecurityReport(_ report: Record, snapshotID: String) {
-    guard pageReady, !recoveringWebContent else { return }
+    guard pageReady, !webRecovery.isRecovering else { return }
     web.callAsyncJavaScript(
       "window.setSecurityCheck(report, snapshotID)",
       arguments: ["report": report, "snapshotID": snapshotID], in: nil, in: .page

@@ -52,24 +52,10 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   var terminating = false
   // Inventory refresh, recovery inspection and app removal have separate lifetimes.
   var auxiliaryBusy = false
-  var operationPhase: PackageOperationPhase = .idle
-  var busy: Bool { auxiliaryBusy || restoringWebState || operationPhase != .idle }
-  var updateInProgress: Bool { operationPhase.isExecuting }
-  var updateRequestID: String?
-  var cancelledPreparationRequestID: String?
-  var updatePreparing: Bool { operationPhase.isPreparing }
-  var preparationControl: UpgradePreparation?
-  var blockedUpdateToken: String?
-  var operationPlan: PackageOperationPlan?
-  var hasOperationPlan: Bool { operationPlan != nil }
+  var operation = PackageOperationState()
+  var webRecovery = WebRecoveryState()
+  var busy: Bool { auxiliaryBusy || webRecovery.isRestoring || operation.phase != .idle }
   var recoveryChecked = false
-  var recoveringWebContent = false
-  var webRecoveryLoading = false
-  var webRecoveryEvent: Record?
-  var lastOperationResult: Record?
-  var restoringWebState = false
-  var lastWebOperationKind = "update"
-  var webRecoveryKeys: [String] = []
   var output: URL {
     FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("BrewPeek", isDirectory: true)
@@ -199,7 +185,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     }
   }
   @objc func refresh() {
-    guard !busy, !hasOperationPlan, updateRequestID == nil
+    guard !busy, !operation.hasPlan, operation.requestID == nil
     else { return }
     cancelSecurityRefresh()
     reportLoadID = nil
@@ -244,7 +230,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     auxiliaryBusy = false
     inventoryRefreshState = error == nil ? "idle" : "failed"
     refreshButton.isEnabled = true
-    if recoveringWebContent {
+    if webRecovery.isRecovering {
       reloadTerminatedWebContentIfReady()
       if let error { showError(error.localizedDescription) }
       return
@@ -321,16 +307,13 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     }
   }
   func showLoadingFailure(useSavedData: Bool = false) {
-    if recoveringWebContent {
+    if webRecovery.isRecovering {
       // The native worker still owns its request until it finishes.
-      guard !auxiliaryBusy, operationPhase == .idle else { return }
+      guard !auxiliaryBusy, operation.phase == .idle else { return }
       reportLoadID = nil
-      restoringWebState = false
-      recoveringWebContent = false
-      webRecoveryLoading = false
-      webRecoveryEvent = nil
-      operationPlan = nil
-      updateRequestID = nil
+      webRecovery.finishRecovery()
+      operation.plan = nil
+      operation.requestID = nil
       pageReady = false
       hasDisplayedData = false
       web.isHidden = true
@@ -358,13 +341,13 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
     if menuItem.action == #selector(focusSearch) { return hasDisplayedData }
     if menuItem.action == #selector(removeApp) || menuItem.action == #selector(refresh) {
-      return !busy && !hasOperationPlan
-        && updateRequestID == nil
+      return !busy && !operation.hasPlan
+        && operation.requestID == nil
     }
     return true
   }
   @objc func removeApp() {
-    guard !busy, !hasOperationPlan, updateRequestID == nil
+    guard !busy, !operation.hasPlan, operation.requestID == nil
     else { return }
     cancelSecurityRefresh()
     auxiliaryBusy = true
@@ -457,7 +440,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     cancelSecurityRefresh()
     reportLoadID = nil
     collectingInventory?.cancel()
-    preparationControl?.cancelAndWait()
+    operation.control?.cancelAndWait()
   }
 }
 @main
