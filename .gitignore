@@ -6,7 +6,6 @@
 # Local development files
 /Makefile
 /Tests/
-/Tools/
 
 # macOS metadata
 .DS_Store
