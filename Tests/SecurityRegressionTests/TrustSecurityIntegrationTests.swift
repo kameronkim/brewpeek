@@ -26,7 +26,12 @@ final class TrustSecurityIntegrationTests: XCTestCase {
       previous = f.app.securityGeneration
     }
     let consent = try f.requiredPlan()
+    try f.workspace.write("delay-trust", "")
     f.approve(consent)
+    try f.wait { FileManager.default.fileExists(atPath: f.workspace.root.appendingPathComponent("trust-started").path) }
+    XCTAssertEqual(f.app.latestSecurityReport?.report["status"] as? String, "checking")
+    if let previous { XCTAssertFalse(previous.withCurrent { true }) }
+    try f.workspace.write("release-trust", "")
     if partial {
       try f.wait { f.app.operation.phase == .idle && !f.app.operation.hasPlan }
     } else {
@@ -44,7 +49,9 @@ final class TrustSecurityIntegrationTests: XCTestCase {
     XCTAssertFalse(try XCTUnwrap(report["findings"] as? [Record]).isEmpty)
     XCTAssertEqual(fresh["status"] as? String,partial ? "incomplete":"succeeded")
     if let previous {
+      let before = try Data(contentsOf: f.workspace.inventory)
       XCTAssertFalse(try SecurityReportStore.update(old,snapshotID:id,at:f.workspace.inventory,generation:previous))
+      XCTAssertEqual(try Data(contentsOf: f.workspace.inventory), before)
     }
     let saved = try XCTUnwrap(InventoryStore.load(f.workspace.inventory)["securityCheck"] as? Record)
     XCTAssertEqual((saved["report"] as? Record)?["checked"] as? Int,partial ? 1:2)

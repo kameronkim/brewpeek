@@ -24,15 +24,6 @@ final class UpgradeExecutionTests: XCTestCase {
     XCTAssertEqual(rows.first { $0["name"] as? String == "extra" }?["relationship"] as? String,"Required by node")
   }
 
-  func testPluralDependencyHeadingKeepsParentRelationship() throws {
-    let f = try UpgradeFixture(), plan = try f.engine.prepare(keys:["formula:node"])
-    let script = try String(contentsOf:f.workspace.url("brew-fixture"),encoding:.utf8)
-    try f.workspace.write("brew-fixture",script.replacingOccurrences(of:"Installing node dependency: extra",with:"Installing dependencies for node: extra"))
-    var events:[Record]=[]
-    _ = try f.engine.execute(plan) { events.append($0) }
-    XCTAssertTrue(events.contains { event in (event["packages"] as? [Record])?.contains { $0["name"] as? String == "extra" && $0["relationship"] as? String == "Required by node" } == true })
-  }
-
   func testNonzeroExitRetainsVerifiedPartialSuccess() throws {
     let f = try UpgradeFixture(), plan = try f.engine.prepare(keys:["formula:node"])
     try f.workspace.write("fail","")

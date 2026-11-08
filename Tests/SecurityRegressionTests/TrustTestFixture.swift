@@ -46,11 +46,6 @@ final class TrustTestFixture {
     app.handleUpdate(["action":"startTrust","token":plan.token,"requestID":request])
   }
   func wait(_ condition:()->Bool,file:StaticString = #filePath,line:UInt = #line) throws {
-    let deadline = Date().addingTimeInterval(8)
-    while !condition() && Date() < deadline { RunLoop.current.run(until:Date().addingTimeInterval(0.01)) }
-    guard condition() else {
-      XCTFail("Native trust callback timed out",file:file,line:line)
-      throw InventoryError(message:"Fixture trust callback timed out")
-    }
+    try NativeTestWait.until(condition, file: file, line: line)
   }
 }

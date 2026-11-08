@@ -84,6 +84,9 @@ elif args[0] == 'upgrade':
         for p in selected:
             print(p['full'] + ' 1 -> 2')
 elif args[0] == 'trust':
+    Path('trust-started').touch()
+    while Path('delay-trust').exists() and not Path('release-trust').exists():
+        time.sleep(0.01)
     kind, name = args[1][2:], args[2]
     if Path('fail-second').exists() and name.endswith('/beta'):
         raise SystemExit(13)

@@ -57,12 +57,6 @@ final class BackgroundSecurityFixture {
   }
   func saved() throws -> Record { try InventoryStore.load(workspace.inventory) }
   func wait(_ condition:()->Bool,file:StaticString = #filePath,line:UInt = #line) throws {
-    let deadline = Date().addingTimeInterval(8)
-    while !condition() && Date() < deadline { RunLoop.current.run(until:Date().addingTimeInterval(0.01)) }
-    guard condition() else {
-      XCTFail("Background callback timed out",file:file,line:line)
-      throw InventoryError(message:"Fixture callback timed out")
-    }
+    try NativeTestWait.until(condition, file: file, line: line)
   }
-  func drain(_ seconds:TimeInterval) { RunLoop.current.run(until:Date().addingTimeInterval(seconds)) }
 }

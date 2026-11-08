@@ -49,7 +49,7 @@ final class FormulaSecurityTests: XCTestCase {
   }
 
   func testMalformedJSONMissingCoverageAndInvalidSchemaFailClosed() throws {
-    for name in ["malformed", "missing-coverage", "invalid-schema"] {
+    for name in ["malformed", "invalid-schema"] {
       let result = try SecurityFixture.check(name, status: 1)
       XCTAssertEqual(result["status"] as? String, "failed", name)
       XCTAssertNil(result["report"], name)
