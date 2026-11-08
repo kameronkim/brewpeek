@@ -56,10 +56,12 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   var webRecovery = WebRecoveryState()
   var busy: Bool { auxiliaryBusy || webRecovery.isRestoring || operation.phase != .idle }
   var recoveryChecked = false
-  var output: URL {
-    FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+  let output: URL
+  init(output: URL? = nil) {
+    self.output = output ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("BrewPeek", isDirectory: true)
       .appendingPathComponent("inventory.json")
+    super.init()
   }
   var reportLoadID: UUID?
   var pageReady = false
