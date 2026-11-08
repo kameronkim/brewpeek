@@ -16,6 +16,11 @@ let package = Package(
       swiftSettings: [.unsafeFlags(["-Osize"], .when(configuration: .release))]
     ),
     .testTarget(
+      name: "CoreRegressionTests",
+      dependencies: ["BrewPeek"],
+      path: "Tests/CoreRegressionTests"
+    ),
+    .testTarget(
       name: "SecurityRegressionTests",
       dependencies: ["BrewPeek"],
       path: "Tests/SecurityRegressionTests",
