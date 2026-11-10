@@ -10,6 +10,7 @@
 /Tests/*
 !/Tests/SecurityRegressionTests/
 !/Tests/CoreRegressionTests/
+!/Tests/WebRegressionTests/
 
 # macOS metadata
 .DS_Store
