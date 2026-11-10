@@ -48,6 +48,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   var securityGeneration: SecurityReportGeneration?
   var interruptedSecurityContext: SecuritySnapshotContext?
   var latestSecurityReport: (snapshotID: String, report: Record)?
+  var securityDeliverySequence = 0
   let securitySupportCache = FormulaSecurity.SupportCache()
   var terminating = false
   // Inventory refresh, recovery inspection and app removal have separate lifetimes.

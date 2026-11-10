@@ -17,6 +17,7 @@ const state = {
 let allPackages = [];
 let securityFindings = new Map();
 let securityReviewCount = 0;
+let lastSecurityDeliverySequence = 0;
 let packageSearch = new Map();
 let sortedPackages = null;
 const $ = (id) => document.getElementById(id);
@@ -394,8 +395,11 @@ function patchSecurityRows() {
     } else if (content) fields.insertAdjacentHTML('beforeend', content);
   }
 }
-window.setSecurityCheck = function (report, snapshotID) {
+window.setSecurityCheck = function (report, snapshotID, deliverySequence) {
   if (brewData?.snapshotID !== snapshotID) return;
+  if (!Number.isSafeInteger(deliverySequence) || deliverySequence <= lastSecurityDeliverySequence) return;
+  // Do not reset for setInventory: revisiting a snapshot must not revive queued calls.
+  lastSecurityDeliverySequence = deliverySequence;
   const view = captureInventoryView();
   brewData.securityCheck = report;
   updateSecurityFindings(report);

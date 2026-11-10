@@ -27,6 +27,12 @@ let package = Package(
       path: "Tests/SecurityRegressionTests",
       resources: [.copy("Fixtures")]
     ),
+    .testTarget(
+      name: "WebRegressionTests",
+      dependencies: ["BrewPeek"],
+      path: "Tests/WebRegressionTests",
+      resources: [.copy("Fixtures")]
+    ),
     .executableTarget(
       name: "BrewPeekAskpass",
       path: "BrewPeek/Askpass",

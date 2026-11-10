@@ -150,9 +150,12 @@ extension DesktopApp {
 
   private func deliverSecurityReport(_ report: Record, snapshotID: String) {
     guard pageReady, !webRecovery.isRecovering else { return }
+    // Keep a page-independent high-water mark: queued WebKit calls cannot revoke
+    // a newer delivery, even when trust refresh keeps the same snapshot ID.
+    securityDeliverySequence += 1
     web.callAsyncJavaScript(
-      "window.setSecurityCheck(report, snapshotID)",
-      arguments: ["report": report, "snapshotID": snapshotID], in: nil, in: .page
+      "window.setSecurityCheck(report, snapshotID, deliverySequence)",
+      arguments: ["report": report, "snapshotID": snapshotID, "deliverySequence": securityDeliverySequence], in: nil, in: .page
     ) { result in
       if case .failure(let error) = result { NSLog("Security UI delivery failed: %@", error.localizedDescription) }
     }
