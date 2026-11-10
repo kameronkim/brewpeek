@@ -97,18 +97,31 @@ final class VersionCleanupTests: XCTestCase {
     XCTAssertEqual(Set(try head.prepare().versions.filter(\.removable).map(\.version)), Set(["0.1", "HEAD-111111"]))
   }
 
-  func testMissingOrMalformedReceiptsFailClosedInsteadOfDeleting() throws {
+  func testMissingReceiptsPreserveHomebrewCandidatesWithoutBlockingPreparation() throws {
     for kegs: [Record] in [
       [["version": "0.1"], ["version": "0.2", "receipt": false]],
       [["version": "0.1"], ["version": "0.2"], ["version": "0.4", "receipt": false]]
     ] {
       let f = try Fixture(kegs: kegs)
       XCTAssertEqual(try f.upstream(), kegs.count == 2 ? [] : ["0.1"])
-      // Known conservative limitation: the product hashes every receipt, so an
-      // incomplete kept keg prevents showing the otherwise valid candidates.
-      XCTAssertThrowsError(try f.prepare())
-      XCTAssertTrue(f.calls.isEmpty)
+      let plan = try f.prepare()
+      XCTAssertEqual(plan.versions.filter(\.removable).map(\.version), kegs.count == 2 ? [] : ["0.1"])
+      let missingVersion = try XCTUnwrap(kegs.last?["version"] as? String)
+      let receipt = f.workspace.url("cellar/" + missingVersion + "/INSTALL_RECEIPT.json")
+      XCTAssertFalse(FileManager.default.fileExists(atPath: receipt.path))
+      if kegs.count == 3 {
+        let result = try f.cleanup.execute(plan, selected: ["0.1"]) { _ in }
+        XCTAssertEqual((result["packages"] as? [Record])?.first?["outcome"] as? String, "removed")
+        XCTAssertEqual(f.calls, ["0.1"])
+        XCTAssertEqual(try f.prepare().versions.map(\.version), ["0.2", "0.4"])
+      } else {
+        XCTAssertTrue(f.calls.isEmpty)
+      }
+      XCTAssertFalse(FileManager.default.fileExists(atPath: receipt.path))
     }
+  }
+
+  func testInvalidReceiptsStillFailClosed() throws {
     let sparse = try Fixture()
     try sparse.workspace.json("cellar/0.1/INSTALL_RECEIPT.json", [String: String]())
     XCTAssertEqual(try sparse.upstream(), ["0.1"], "Homebrew defaults a missing version_scheme to zero")
@@ -116,6 +129,41 @@ final class VersionCleanupTests: XCTestCase {
     let malformed = try Fixture(kegs: [["version": "0.1", "malformed": true], ["version": "0.2"]])
     XCTAssertThrowsError(try malformed.prepare())
     XCTAssertTrue(malformed.calls.isEmpty)
+    let unreadable = try Fixture(kegs: [["version": "0.1", "receipt": false], ["version": "0.2"]])
+    try FileManager.default.createDirectory(at: unreadable.workspace.url("cellar/0.1/INSTALL_RECEIPT.json"), withIntermediateDirectories: false)
+    XCTAssertThrowsError(try unreadable.prepare(), "Non-missing receipt read errors must not use the missing fallback")
+    XCTAssertTrue(unreadable.calls.isEmpty)
+  }
+
+  func testMissingReceiptCanBeEligibleOnceLatestIsInstalled() throws {
+    for protection in ["none", "linked", "optlinked", "pinned"] {
+      let f = try Fixture(kegs: [["version": "0.1", "receipt": false,
+                                "linked": protection == "linked", "optlinked": protection == "optlinked"],
+                               ["version": "0.2"]], latest: "0.2")
+      f.state["pinned"] = protection == "pinned"; try f.save()
+      XCTAssertEqual(try f.upstream(), protection == "linked" ? [] : ["0.1"], protection)
+      let plan = try f.prepare()
+      XCTAssertEqual(plan.versions.filter(\.removable).map(\.version), protection == "none" ? ["0.1"] : [], protection)
+      if protection == "none" {
+        let result = try f.cleanup.execute(plan, selected: ["0.1"]) { _ in }
+        XCTAssertEqual((result["packages"] as? [Record])?.first?["outcome"] as? String, "removed")
+        XCTAssertEqual(f.calls, ["0.1"])
+      } else {
+        XCTAssertTrue(f.calls.isEmpty)
+      }
+      XCTAssertFalse(FileManager.default.fileExists(atPath: f.workspace.url("cellar/0.1/INSTALL_RECEIPT.json").path))
+    }
+  }
+
+  func testReceiptAppearanceInvalidatesConfirmedMissingReceipt() throws {
+    let f = try Fixture(kegs: [["version": "0.1", "receipt": false], ["version": "0.2"]], latest: "0.2")
+    let plan = try f.prepare()
+    try f.workspace.json("cellar/0.1/INSTALL_RECEIPT.json", [String: String]())
+    XCTAssertNotEqual(plan.fingerprint, try f.prepare().fingerprint)
+    let result = try f.cleanup.execute(plan, selected: ["0.1"]) { _ in }
+    XCTAssertTrue((result["details"] as? String)?.contains("Installed versions changed") == true)
+    XCTAssertTrue(f.calls.isEmpty)
+    XCTAssertEqual(f.locks, ["lock", "unlock"])
   }
 
   func testExecutionRemovesOnlySelectedEligibleVersionAndVerifiesResult() throws {
