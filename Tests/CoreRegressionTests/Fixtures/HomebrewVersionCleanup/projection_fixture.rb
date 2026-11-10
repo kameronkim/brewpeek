@@ -28,7 +28,10 @@ class Keg
   def version; FixtureVersion.new(@path.basename.to_s); end
   def data; $state.fetch("kegs").find { |k| k.fetch("version") == version.to_s } || raise("unknown fixture keg"); end
   def tab
-    record = JSON.parse((@path/AbstractTab::FILENAME).read)
+    # Tab.for_keg uses Tab.empty (version_scheme 0) when the receipt is absent.
+    # This fallback is in memory only; malformed/read failures still propagate.
+    receipt = @path/AbstractTab::FILENAME
+    record = receipt.exist? ? JSON.parse(receipt.read) : {}
     Struct.new(:version_scheme).new(record.fetch("source", {}).fetch("versions", {}).fetch("version_scheme", 0))
   end
   def scheme_and_version; [tab.version_scheme, version]; end
