@@ -113,25 +113,23 @@ function securityDetail(p) {
   const finding = securityFor(p);
   const id = formulaIdentity(key(p).slice(8));
   const includes = names => (names || []).some(name => formulaIdentity(name) === id);
-  let notes = [];
-  if (hasMultipleInstalledVersions(p)) notes.push('Multiple versions are installed. Coverage is reported per Formula, not per installed version.');
-  if (check.status === 'checking') notes.push('Checking Formula security information…');
-  if (check.status === 'unsupported') notes.push('This Homebrew does not support vulnerability scan coverage JSON.');
-  if (check.status === 'failed') notes.push('Security check failed. Any retained findings are unconfirmed.');
-  else if (check.complete === false) notes.push('Scan incomplete. Findings do not cover every installed Formula.');
-  if (includes(report?.skipped_formulae)) notes.push('Not scanned: no supported source URL.');
+  const notes = [];
+  if (check.status === 'failed' && finding) notes.push('Security check failed. Previous findings are unconfirmed.');
+  if (report && hasMultipleInstalledVersions(p)) notes.push('Multiple versions are installed. This report does not confirm that every installed version was scanned.');
+  if (includes(report?.skipped_formulae)) notes.push('This Formula was not scanned. Reason: No supported source URL.');
   if (includes(report?.outdated_without_sbom)) notes.push('Installed source unknown: no SBOM for this old version. Findings may reflect the current Formula recipe.');
   const reason = Object.entries(report?.unscanned_formulae || {}).find(([name]) => formulaIdentity(name) === id)?.[1];
-  if (reason) notes.push(`Not scanned: ${reason}.`);
+  if (reason) notes.push(`This Formula was not scanned. Reason: ${reason}.`);
+  let content = notes.map(esc).join('<br>');
   if (finding) {
-    notes.push(`Reported version: ${finding.version}`);
+    content += `${content ? '<br><br>' : ''}Reported version: ${esc(finding.version)}`;
     for (const [label, items] of [['Open finding', finding.vulnerabilities], ['Resolved by Formula patch', finding.patched]]) {
       for (const item of items || []) {
-        notes.push(`${label}: ${item.id} · ${item.severity}${item.summary ? ' · ' + item.summary : ''}${item.fixed_versions?.length ? ' · Reported fixes: ' + item.fixed_versions.join(', ') : ''}`);
+        content += `<div class="security-entry"><strong>${esc(label)} · ${esc(item.id)} · ${esc(item.severity)}</strong>${item.summary ? '<br>' + esc(item.summary) : ''}${item.fixed_versions?.length ? '<br>Reported fixes: ' + esc(item.fixed_versions.join(', ')) : ''}</div>`;
       }
     }
-  } else if (report) notes.push('No finding reported for this Formula. This is not a safety guarantee.');
-  return notes.length ? field('SECURITY · HOMEBREW', notes.map(esc).join('<br>'), true) : '';
+  }
+  return content ? field('SECURITY · HOMEBREW', content, true) : '';
 }
 function renderSecurityNote() {
   const check = brewData.securityCheck;
@@ -142,15 +140,30 @@ function renderSecurityNote() {
   const findings = report?.findings || [];
   const open = findings.filter(f => f.vulnerabilities?.length).length;
   const patched = findings.filter(f => f.patched?.length).length;
-  let text = `Security · ${open} Formulae with open findings · ${patched} with findings resolved by Formula patches`;
-  if (check.status === 'checking') text = 'Checking Formula security information…';
-  else if (check.status === 'unsupported') text = 'Security check unavailable in this Homebrew version';
-  else if (check.status === 'failed') text = report ? text + ' · Check failed; retained findings are unconfirmed' : 'Security check failed';
-  else if (!check.complete) text += ' · Scan incomplete';
-  else text += ' · Homebrew reports complete Formula coverage';
-  if ((brewData.formulae || []).some(hasMultipleInstalledVersions)) text += ' · This does not confirm every installed version was scanned.';
-  note.textContent = text + ' · Formulae only; Casks are not scanned. No safety guarantee.';
-  note.title = [check.error, check.diagnostic].filter(Boolean).join('\n');
+  let summary = open ? `Security review · ${open} ${open === 1 ? 'Formula' : 'Formulae'}` : 'No findings reported';
+  let coverage;
+  if (check.status === 'checking') summary = coverage = 'Checking Formula security information…';
+  else if (check.status === 'unsupported') summary = coverage = 'Security check unavailable in this Homebrew version';
+  else if (check.status === 'failed') summary = coverage = report ? 'Security check failed · Previous findings are unconfirmed' : 'Security check failed';
+  else if (check.status === 'succeeded' && check.complete === true) coverage = 'Homebrew reports complete Formula coverage.';
+  else {
+    summary += ' · Scan incomplete';
+    coverage = 'Scan incomplete. Findings do not cover every installed Formula.';
+  }
+  // Preserve the disclosure node, its open state and keyboard focus during background updates.
+  if (!note.querySelector('.security-summary')) {
+    note.innerHTML = '<div class="security-brief"><span class="security-summary" role="status"></span><details class="scan-details"><summary>Scan details</summary><div class="scan-details-copy"></div></details></div>';
+  }
+  note.querySelector('.security-summary').textContent = summary;
+  const details = [
+    ...(report ? [`${open} ${open === 1 ? 'Formula' : 'Formulae'} with open findings`, `${patched} with findings resolved by Formula patches`] : []),
+    coverage,
+    'This does not confirm every installed version was scanned.',
+    'Casks are not scanned.',
+    'No findings does not guarantee safety.',
+    ...[check.error, check.diagnostic].filter(Boolean),
+  ];
+  note.querySelector('.scan-details-copy').innerHTML = details.map(text => `<p>${esc(text)}</p>`).join('');
 }
 function detail(p) {
   let fields =

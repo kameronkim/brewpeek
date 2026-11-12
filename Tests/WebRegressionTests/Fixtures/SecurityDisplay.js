@@ -36,6 +36,23 @@ return (() => {
   delete data.securityCheck; setInventory(data);
   assert(document.getElementById('security-note').hidden, 'Legacy snapshot has no invented security result');
   data.securityCheck = {scope:'formulae',status:'succeeded',complete:true,report:{checked:3,findings:[]}}; setInventory(data);
-  assert(!/all.*safe|secure packages|vulnerability.free/i.test(document.getElementById('security-note').textContent), 'No global safety assertion');
-  return 'PASS WebKit findings/patch/SBOM/scope, identity separation, escaped text, retained Update confirmation, unsupported/failure fallback and legacy refresh';
+  assert(!/\ball\b.*\bsafe\b|secure packages|vulnerability.free/i.test(document.getElementById('security-note').textContent), 'No global safety assertion');
+  data.snapshotID = 'scope-details'; setInventory(data);
+  const disclosure = document.querySelector('#security-note details');
+  disclosure.open = true;
+  const disclosureButton = disclosure.querySelector('summary'); disclosureButton.focus();
+  setSecurityCheck({scope:'formulae',status:'failed',error:'<script>error</script>',report:data.securityCheck.report},'scope-details',3);
+  assert(document.querySelector('#security-note details')===disclosure && disclosure.open,'Disclosure node and open state survive background result');
+  assert(document.activeElement===disclosureButton,'Disclosure keyboard focus preserved');
+  assert(document.querySelector('.security-summary').textContent==='Security check failed · Previous findings are unconfirmed','Failure remains in the compact summary');
+  assert(!document.querySelector('#security-note script') && document.querySelector('.scan-details-copy').textContent.includes('<script>error</script>'),'Diagnostic text is escaped in visible details');
+  state.expanded.add('formula:alpha');render();
+  setSecurityCheck({scope:'formulae',status:'incomplete',complete:false,report:{findings:[],skipped_formulae:['alpha'],unscanned_formulae:{'patched':'resolution_error'}}},'scope-details',4);
+  assert(detail(data.formulae[0]).includes('This Formula was not scanned.'),'Unscanned Formula keeps an explicit exception');
+  assert(!detail(data.formulae[0]).includes('No finding reported'),'Unscanned is not presented as a clean result');
+  assert(detail(data.formulae[2]).includes('resolution_error'),'Individual upstream failure reason retained');
+  assert(document.querySelector('.security-summary').textContent.includes('No findings reported · Scan incomplete'),'Empty incomplete report does not imply full coverage');
+  setSecurityCheck({scope:'formulae',status:'succeeded',complete:true,report:{findings:[]}},'scope-details',5);
+  assert(![...document.querySelectorAll('.detail-field')].some(f=>f.querySelector('dt').textContent==='SECURITY · HOMEBREW'),'Empty single-version security field is removed by the live patch');
+  return 'PASS WebKit findings/patch/SBOM/scope, escaping, update confirmation, fallback, compact summary, scoped exceptions and disclosure focus';
 })()
