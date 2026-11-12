@@ -43,12 +43,12 @@ final class SecurityInventoryTests: XCTestCase {
       assertUpdates(snapshot)
       try InventoryStore.save(snapshot,to:w.inventory)
       let restored = try InventoryStore.load(w.inventory)
-      XCTAssertEqual((restored["securityCheck"] as? Record)?["status"] as? String,status)
+      XCTAssertNil(restored["securityCheck"])
       let commands = try String(contentsOf:w.root.appendingPathComponent("commands"),encoding:.utf8)
       XCTAssertFalse(commands.split(separator:"\n").contains { ["upgrade","install","uninstall"].contains(String($0.split(separator:" ").first ?? "")) })
     }
   }
-  func testScanOutcomesRemainIndependentOfUpdatesAndRetainReportsAfterSaving() throws {
+  func testScanOutcomesRemainIndependentOfUpdatesWithoutPersistingReports() throws {
     for (name,exit,status) in [("complete-open","1","succeeded"),("incomplete-sbom","1","incomplete"),("complete-open","2","failed")] {
       let (w,inventory) = try fixture(report:name,status:exit)
       let snapshot = try inventory.collect(includeSecurity:true)
@@ -56,7 +56,7 @@ final class SecurityInventoryTests: XCTestCase {
       assertUpdates(snapshot)
       try InventoryStore.save(snapshot,to:w.inventory)
       let restored = try InventoryStore.load(w.inventory)
-      XCTAssertNotNil((restored["securityCheck"] as? Record)?["report"])
+      XCTAssertNil(restored["securityCheck"])
       assertUpdates(restored)
     }
   }

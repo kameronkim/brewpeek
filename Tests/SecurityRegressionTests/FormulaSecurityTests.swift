@@ -80,10 +80,10 @@ final class FormulaSecurityTests: XCTestCase {
     }
   }
 
-  func testSavedInvalidSecurityCannotBreakInventoryLoading() throws {
+  func testLegacyInvalidSecurityIsIgnoredWhenLoadingInventory() throws {
     let snapshot = SecurityFixture.snapshot(check: ["status": "succeeded", "scope": "formulae", "report": ["findings": "bad"]])
     let loaded = try InventoryStore.decode(SecurityFixture.canonical(snapshot))
-    XCTAssertEqual((loaded["securityCheck"] as? Record)?["status"] as? String, "failed")
+    XCTAssertNil(loaded["securityCheck"])
     XCTAssertEqual(loaded["snapshotID"] as? String, "snapshot-A")
   }
   func testCheckedBooleanAndMalformedFindingArraysAreRejected() throws {

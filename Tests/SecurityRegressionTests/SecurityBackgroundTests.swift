@@ -23,22 +23,21 @@ final class SecurityBackgroundTests: XCTestCase {
     try f.workspace.write("release","")
     try f.wait { f.app.latestSecurityReport != nil && f.app.securityGeneration == nil }
     XCTAssertEqual(f.app.latestSecurityReport?.report["status"] as? String,"succeeded")
-    XCTAssertEqual((try f.saved()["securityCheck"] as? Record)?["status"] as? String,"succeeded")
+    XCTAssertNil(try f.saved()["securityCheck"])
   }
 
-  func testStaleSnapshotSaveAndCancelledScanCannotPublishIntoCurrentInventory() throws {
-    let f = try BackgroundSecurityFixture(), oldID = try XCTUnwrap(f.snapshot["snapshotID"] as? String)
+  func testCancelledScanCannotPublishIntoCurrentSession() throws {
+    let f = try BackgroundSecurityFixture()
     f.snapshot["snapshotID"] = UUID().uuidString
     try SecurityFixture.saveSnapshot(f.snapshot,to:f.workspace.inventory)
-    XCTAssertFalse(try SecurityReportStore.update(["status":"unsupported","scope":"formulae"],snapshotID:oldID,at:f.workspace.inventory))
     try f.workspace.write("cancellable","")
     f.start(); try f.wait { f.scans == 1 }
     let owner = try XCTUnwrap(f.app.securityGeneration)
     f.app.cancelSecurityRefresh()
     try NativeTestWait.remains { f.app.securityInventory == nil && f.app.latestSecurityReport == nil }
-    XCTAssertFalse(owner.withCurrent { true })
+    XCTAssertNotEqual(f.app.securityGeneration,owner)
     XCTAssertNil(f.app.securityInventory); XCTAssertNil(f.app.latestSecurityReport)
-    XCTAssertEqual((try f.saved()["securityCheck"] as? Record)?["status"] as? String,"checking")
+    XCTAssertNil(try f.saved()["securityCheck"])
   }
 
   func testMutationStartCancelsOwnedReadOnlyScan() throws {
@@ -79,44 +78,31 @@ final class SecurityBackgroundTests: XCTestCase {
     try f.remove("unsupported"); XCTAssertEqual(check("E")["status"] as? String,"succeeded")
   }
 
-  func testPersistenceContentionRetriesWithoutRerunningScanner() throws {
-    let f = try BackgroundSecurityFixture(), baseline = f.scans
-    try HomebrewOperationLock.withLock(at:f.workspace.inventory) {
-      f.start(); try f.wait { f.app.latestSecurityReport != nil }
-      try NativeTestWait.remains { f.app.securityGeneration != nil }
+  func testScanDoesNotWaitForInventoryLockOrRewriteTheFile() throws {
+    let f = try BackgroundSecurityFixture(), before = try Data(contentsOf: f.workspace.inventory)
+    try HomebrewOperationLock.withLock(at: f.workspace.inventory) {
+      f.start()
+      try f.wait { f.app.latestSecurityReport != nil && f.app.securityGeneration == nil }
       XCTAssertEqual(f.app.latestSecurityReport?.report["status"] as? String,"succeeded")
-      XCTAssertNotNil(f.app.securityGeneration)
     }
-    try f.wait { f.app.securityGeneration == nil }
-    XCTAssertEqual((try f.saved()["securityCheck"] as? Record)?["status"] as? String,"succeeded")
-    XCTAssertEqual(f.scans,baseline+1)
+    XCTAssertEqual(try Data(contentsOf: f.workspace.inventory),before)
+    XCTAssertEqual(f.scans,1)
   }
 
-  func testCancellationInvalidatesQueuedPersistenceRetries() throws {
-    let f = try BackgroundSecurityFixture()
-    try HomebrewOperationLock.withLock(at:f.workspace.inventory) {
-      f.start(); try f.wait { f.app.latestSecurityReport != nil }
-      try NativeTestWait.remains { f.app.securityGeneration != nil }
-      f.app.cancelSecurityRefresh()
-    }
-    let before = try Data(contentsOf: f.workspace.inventory)
-    try NativeTestWait.remains { (try? Data(contentsOf: f.workspace.inventory)) == before }
-    f.app.startSecurityRefresh(f.snapshot,using:Inventory(brew:f.brew),at:f.workspace.inventory)
-    XCTAssertNil(f.app.securityGeneration); XCTAssertNil(f.app.securityInventory); XCTAssertNil(f.app.latestSecurityReport)
-    XCTAssertEqual((try f.saved()["securityCheck"] as? Record)?["status"] as? String,"checking")
-  }
-
-  func testNewInventoryIsPreservedWhenOldPersistenceRetryResumes() throws {
-    let f = try BackgroundSecurityFixture(), newerID = UUID().uuidString
-    try HomebrewOperationLock.withLock(at:f.workspace.inventory) {
-      f.start(); try f.wait { f.app.latestSecurityReport != nil }
-      f.snapshot["snapshotID"] = newerID
-      try InventoryStore.save(f.snapshot,to:f.workspace.inventory)
-    }
-    try f.wait { f.app.securityGeneration == nil }
-    let saved = try f.saved()
-    XCTAssertEqual(saved["snapshotID"] as? String,newerID)
-    XCTAssertEqual((saved["securityCheck"] as? Record)?["status"] as? String,"checking")
+  func testNewAppSessionScansAgainWithoutRestoringOldFindings() throws {
+    let f = try BackgroundSecurityFixture(); f.start()
+    try f.wait { f.app.latestSecurityReport != nil && f.app.securityGeneration == nil }
+    let scans = f.scans
+    let newApp = DesktopApp()
+    defer { newApp.cancelSecurityRefresh() }
+    let snapshot = InventoryStore.displaySnapshot(try f.saved())
+    XCTAssertEqual((snapshot["securityCheck"] as? Record)?["status"] as? String,"checking")
+    XCTAssertNil((snapshot["securityCheck"] as? Record)?["report"])
+    newApp.observeSecuritySnapshot(snapshot)
+    newApp.startSecurityRefresh(snapshot,using:Inventory(brew:f.brew))
+    try f.wait { newApp.latestSecurityReport != nil && newApp.securityGeneration == nil }
+    XCTAssertEqual(f.scans,scans+1)
+    XCTAssertNil(try f.saved()["securityCheck"])
   }
 
   func testExecutionAndRefreshFailuresEndInterruptedCheckingState() throws {
@@ -128,7 +114,7 @@ final class SecurityBackgroundTests: XCTestCase {
       XCTAssertTrue(f.app.beginPackageExecution(record:[:],requestID:request))
       XCTAssertTrue(f.app.finishPackageOperation(["kind":kind,"message":"fixture error","refreshError":"fixture refresh failed"],requestID:request))
       try f.wait { f.app.latestSecurityReport != nil && f.app.securityGeneration == nil }
-      XCTAssertEqual((try f.saved()["securityCheck"] as? Record)?["status"] as? String,"failed")
+      XCTAssertNil(try f.saved()["securityCheck"])
       XCTAssertNil(f.app.securityInventory); XCTAssertFalse(f.app.busy)
       XCTAssertEqual(f.app.latestSecurityReport?.report["error"] as? String,"The inventory could not be refreshed after the package operation. Refresh before checking security again.")
     }
@@ -140,7 +126,7 @@ final class SecurityBackgroundTests: XCTestCase {
     XCTAssertTrue(f.app.beginPackageExecution(record:[:],requestID:"before-scan"))
     XCTAssertTrue(f.app.finishPackageOperation(["kind":"error","message":"fixture failure"],requestID:"before-scan"))
     try f.wait { f.app.latestSecurityReport != nil && f.app.securityGeneration == nil }
-    XCTAssertEqual((try f.saved()["securityCheck"] as? Record)?["status"] as? String,"failed")
+    XCTAssertNil(try f.saved()["securityCheck"])
   }
 
   func testReplacementInventoryAvoidsObsoleteInterruptionError() throws {
@@ -150,14 +136,14 @@ final class SecurityBackgroundTests: XCTestCase {
     var fresh = f.snapshot
     fresh["snapshotID"] = UUID().uuidString; fresh["securityCheck"] = ["scope":"formulae","status":"unsupported"]
     try SecurityFixture.saveSnapshot(fresh,to:f.workspace.inventory)
-    f.app.observeSecuritySnapshot(fresh,at:f.workspace.inventory)
+    f.app.observeSecuritySnapshot(fresh)
     XCTAssertTrue(f.app.finishPackageOperation(["kind":"result","snapshot":fresh],requestID:"fresh-result"))
     try NativeTestWait.remains {
       f.app.latestSecurityReport == nil && f.app.securityGeneration == nil
     }
     let saved = try f.saved()
     XCTAssertEqual(saved["snapshotID"] as? String,fresh["snapshotID"] as? String)
-    XCTAssertEqual((saved["securityCheck"] as? Record)?["status"] as? String,"unsupported")
+    XCTAssertNil(saved["securityCheck"])
   }
 
   func testObsoleteDeliveryCannotCancelNewOwnerOrRestartDuringRefresh() throws {
@@ -165,7 +151,7 @@ final class SecurityBackgroundTests: XCTestCase {
     f.snapshot["snapshotID"] = UUID().uuidString
     try SecurityFixture.saveSnapshot(f.snapshot,to:f.workspace.inventory)
     f.start(); let owner = f.app.securityGeneration
-    f.app.startSecurityRefresh(obsolete,using:Inventory(brew:f.brew),at:f.workspace.inventory)
+    f.app.startSecurityRefresh(obsolete,using:Inventory(brew:f.brew))
     XCTAssertEqual(f.app.securityGeneration,owner)
     XCTAssertEqual(f.app.securityContext?.id,f.snapshot["snapshotID"] as? String)
     try f.wait { f.app.latestSecurityReport != nil && f.app.securityGeneration == nil }

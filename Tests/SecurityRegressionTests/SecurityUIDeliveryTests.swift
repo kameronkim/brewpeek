@@ -87,15 +87,15 @@ final class SecurityUIDeliveryTests: XCTestCase {
     for (key, value) in r { XCTAssertTrue(value, key) }
   }
 
-  func testNativeTrustRefreshAndUpdateCancellationKeepFreshFileAndDelayedUI() throws {
+  func testNativeTrustRefreshAndUpdateCancellationKeepFreshSessionAndDelayedUI() throws {
     let p = try Page(), f = try TrustTestFixture(formulaeOnly: true)
     var old = try SecurityFixture.check("incomplete-untrusted", status: 1); old["fixtureOld"] = true
     let snapshot = SecurityFixture.snapshot(id: UUID().uuidString, check: old)
     let id = try XCTUnwrap(snapshot["snapshotID"] as? String)
     try SecurityFixture.saveSnapshot(snapshot, to: f.workspace.inventory)
-    f.app.observeSecuritySnapshot(snapshot, at: f.workspace.inventory)
+    f.app.observeSecuritySnapshot(snapshot)
     f.app.web = p.web; f.app.pageReady = true; f.app.latestSecurityReport = (id, old)
-    let oldOwner = SecurityReportGeneration()
+    let oldOwner = UUID()
     f.app.securityGeneration = oldOwner
     defer { f.app.pageReady = false; f.app.cancelSecurityRefresh() }
     try p.run(#"""
@@ -120,9 +120,8 @@ final class SecurityUIDeliveryTests: XCTestCase {
     try f.workspace.write("release-scan", "")
     try f.wait { f.app.securityGeneration == nil && f.app.latestSecurityReport?.report["status"] as? String == "succeeded" }
     let saved = try Data(contentsOf: f.workspace.inventory)
-    let report = try XCTUnwrap(InventoryStore.load(f.workspace.inventory)["securityCheck"] as? Record)
-    XCTAssertEqual(report["status"] as? String, "succeeded")
-    XCTAssertFalse(try SecurityReportStore.update(old, snapshotID: id, at: f.workspace.inventory, generation: oldOwner))
+    XCTAssertNil(try InventoryStore.load(f.workspace.inventory)["securityCheck"])
+    XCTAssertNotEqual(f.app.securityGeneration,oldOwner)
     XCTAssertEqual(try p.run("releaseOld(); return brewData.securityCheck.status;") as? String, "succeeded")
     XCTAssertEqual(try Data(contentsOf: f.workspace.inventory), saved)
     XCTAssertEqual(try p.run("return deliveryTrace.length >= 3 && deliveryTrace.every(d=>Number.isSafeInteger(d.sequence)&&d.sequence>0) && new Set(deliveryTrace.map(d=>d.sequence)).size===deliveryTrace.length;") as? Bool, true)

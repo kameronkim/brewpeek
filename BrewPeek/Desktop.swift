@@ -45,7 +45,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   var collectingInventory: Inventory?
   var securityInventory: Inventory?
   var securityContext: SecuritySnapshotContext?
-  var securityGeneration: SecurityReportGeneration?
+  var securityGeneration: UUID?
   var interruptedSecurityContext: SecuritySnapshotContext?
   var latestSecurityReport: (snapshotID: String, report: Record)?
   var securityDeliverySequence = 0

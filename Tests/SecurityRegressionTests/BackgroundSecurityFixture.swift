@@ -40,7 +40,7 @@ final class BackgroundSecurityFixture {
     try SecurityFixture.saveSnapshot(snapshot,to:w.inventory)
     app = DesktopApp(output:w.inventory)
     app.recoveryChecked = true
-    app.observeSecuritySnapshot(snapshot,at:w.inventory)
+    app.observeSecuritySnapshot(snapshot)
   }
   deinit { app.cancelSecurityRefresh() }
   var commands:[String] {
@@ -52,8 +52,8 @@ final class BackgroundSecurityFixture {
     if FileManager.default.fileExists(atPath:path.path) { try FileManager.default.removeItem(at:path) }
   }
   func start() {
-    app.observeSecuritySnapshot(snapshot,at:workspace.inventory)
-    app.startSecurityRefresh(snapshot,using:Inventory(brew:brew),at:workspace.inventory)
+    app.observeSecuritySnapshot(snapshot)
+    app.startSecurityRefresh(snapshot,using:Inventory(brew:brew))
   }
   func saved() throws -> Record { try InventoryStore.load(workspace.inventory) }
   func wait(_ condition:()->Bool,file:StaticString = #filePath,line:UInt = #line) throws {

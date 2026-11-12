@@ -11,17 +11,17 @@ final class TrustSecurityIntegrationTests: XCTestCase {
     let snapshot = SecurityFixture.snapshot(id:UUID().uuidString,check:old)
     try SecurityFixture.saveSnapshot(snapshot,to:f.workspace.inventory)
     let id = try XCTUnwrap(snapshot["snapshotID"] as? String)
-    f.app.observeSecuritySnapshot(snapshot,at:f.workspace.inventory)
+    f.app.observeSecuritySnapshot(snapshot)
     f.app.latestSecurityReport = (id,old)
     let baseline = f.scans
-    f.app.startSecurityRefresh(snapshot,using:Inventory(brew:f.brew),at:f.workspace.inventory)
+    f.app.startSecurityRefresh(snapshot,using:Inventory(brew:f.brew))
     XCTAssertEqual(f.scans,baseline); XCTAssertNil(f.app.securityInventory)
     try f.workspace.write("delay-scan","")
-    var previous:SecurityReportGeneration?
+    var previous:UUID?
     if delayed {
       f.app.latestSecurityReport = nil
       var pending = snapshot; pending["securityCheck"] = ["scope":"formulae","status":"checking"]
-      f.app.startSecurityRefresh(pending,using:Inventory(brew:f.brew),at:f.workspace.inventory)
+      f.app.startSecurityRefresh(pending,using:Inventory(brew:f.brew))
       try f.wait { FileManager.default.fileExists(atPath:f.workspace.root.appendingPathComponent("scan-started").path) }
       previous = f.app.securityGeneration
     }
@@ -30,7 +30,7 @@ final class TrustSecurityIntegrationTests: XCTestCase {
     f.approve(consent)
     try f.wait { FileManager.default.fileExists(atPath: f.workspace.root.appendingPathComponent("trust-started").path) }
     XCTAssertEqual(f.app.latestSecurityReport?.report["status"] as? String, "checking")
-    if let previous { XCTAssertFalse(previous.withCurrent { true }) }
+    if let previous { XCTAssertNotEqual(f.app.securityGeneration,previous) }
     try f.workspace.write("release-trust", "")
     if partial {
       try f.wait { f.app.operation.phase == .idle && !f.app.operation.hasPlan }
@@ -48,15 +48,10 @@ final class TrustSecurityIntegrationTests: XCTestCase {
     XCTAssertEqual(report["checked"] as? Int,partial ? 1:2)
     XCTAssertFalse(try XCTUnwrap(report["findings"] as? [Record]).isEmpty)
     XCTAssertEqual(fresh["status"] as? String,partial ? "incomplete":"succeeded")
-    if let previous {
-      let before = try Data(contentsOf: f.workspace.inventory)
-      XCTAssertFalse(try SecurityReportStore.update(old,snapshotID:id,at:f.workspace.inventory,generation:previous))
-      XCTAssertEqual(try Data(contentsOf: f.workspace.inventory), before)
-    }
-    let saved = try XCTUnwrap(InventoryStore.load(f.workspace.inventory)["securityCheck"] as? Record)
-    XCTAssertEqual((saved["report"] as? Record)?["checked"] as? Int,partial ? 1:2)
+    if let previous { XCTAssertNotEqual(f.app.securityGeneration,previous) }
+    XCTAssertNil(try InventoryStore.load(f.workspace.inventory)["securityCheck"])
     let scans = f.scans
-    f.app.startSecurityRefresh(snapshot,using:Inventory(brew:f.brew),at:f.workspace.inventory)
+    f.app.startSecurityRefresh(snapshot,using:Inventory(brew:f.brew))
     XCTAssertEqual(f.scans,scans)
     XCTAssertFalse(f.commands.contains { $0.first == "upgrade" && !$0.contains("--dry-run") })
     XCTAssertEqual(f.writes.count,partial ? 1:2)

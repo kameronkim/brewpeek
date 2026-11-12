@@ -102,7 +102,8 @@ function needsSecurityReview(p) {
   return Boolean(securityFor(p)?.vulnerabilities?.length);
 }
 function updateSecurityFindings(check) {
-  securityFindings = new Map((check?.report?.findings || []).map(f => [formulaIdentity(f.formula), f]));
+  const findings = ['succeeded', 'incomplete'].includes(check?.status) ? check.report?.findings || [] : [];
+  securityFindings = new Map(findings.map(f => [formulaIdentity(f.formula), f]));
   securityReviewCount = allPackages.filter(needsSecurityReview).length;
   if (!securityReviewCount && state.filter === 'security') state.filter = 'all';
 }
@@ -116,7 +117,6 @@ function securityDetail(p) {
   const id = formulaIdentity(key(p).slice(8));
   const includes = names => (names || []).some(name => formulaIdentity(name) === id);
   const notes = [];
-  if (check.status === 'failed') notes.push('Security check failed. Previous findings are unconfirmed.');
   if (report && hasMultipleInstalledVersions(p)) notes.push('Multiple versions are installed. This report does not confirm that every installed version was scanned.');
   if (includes(report?.outdated_without_sbom)) notes.push('Installed source unknown: no SBOM for this old version. Findings may reflect the current Formula recipe.');
   let content = notes.map(esc).join('<br>');
