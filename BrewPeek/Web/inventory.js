@@ -104,6 +104,7 @@ function needsSecurityReview(p) {
 function updateSecurityFindings(check) {
   securityFindings = new Map((check?.report?.findings || []).map(f => [formulaIdentity(f.formula), f]));
   securityReviewCount = allPackages.filter(needsSecurityReview).length;
+  if (!securityReviewCount && state.filter === 'security') state.filter = 'all';
 }
 function securityDetail(p) {
   if (p.type !== 'formula') return '';
@@ -111,22 +112,18 @@ function securityDetail(p) {
   if (!check) return '';
   const report = check.report;
   const finding = securityFor(p);
+  if (!finding) return '';
   const id = formulaIdentity(key(p).slice(8));
   const includes = names => (names || []).some(name => formulaIdentity(name) === id);
   const notes = [];
-  if (check.status === 'failed' && finding) notes.push('Security check failed. Previous findings are unconfirmed.');
+  if (check.status === 'failed') notes.push('Security check failed. Previous findings are unconfirmed.');
   if (report && hasMultipleInstalledVersions(p)) notes.push('Multiple versions are installed. This report does not confirm that every installed version was scanned.');
-  if (includes(report?.skipped_formulae)) notes.push('This Formula was not scanned. Reason: No supported source URL.');
   if (includes(report?.outdated_without_sbom)) notes.push('Installed source unknown: no SBOM for this old version. Findings may reflect the current Formula recipe.');
-  const reason = Object.entries(report?.unscanned_formulae || {}).find(([name]) => formulaIdentity(name) === id)?.[1];
-  if (reason) notes.push(`This Formula was not scanned. Reason: ${reason}.`);
   let content = notes.map(esc).join('<br>');
-  if (finding) {
-    content += `${content ? '<br><br>' : ''}Reported version: ${esc(finding.version)}`;
-    for (const [label, items] of [['Open finding', finding.vulnerabilities], ['Resolved by Formula patch', finding.patched]]) {
-      for (const item of items || []) {
-        content += `<div class="security-entry"><strong>${esc(label)} · ${esc(item.id)} · ${esc(item.severity)}</strong>${item.summary ? '<br>' + esc(item.summary) : ''}${item.fixed_versions?.length ? '<br>Reported fixes: ' + esc(item.fixed_versions.join(', ')) : ''}</div>`;
-      }
+  content += `${content ? '<br><br>' : ''}Reported version: ${esc(finding.version)}`;
+  for (const [label, items] of [['Open finding', finding.vulnerabilities], ['Resolved by Formula patch', finding.patched]]) {
+    for (const item of items || []) {
+      content += `<div class="security-entry"><strong>${esc(label)} · ${esc(item.id)} · ${esc(item.severity)}</strong>${item.summary ? '<br>' + esc(item.summary) : ''}${item.fixed_versions?.length ? '<br>Reported fixes: ' + esc(item.fixed_versions.join(', ')) : ''}</div>`;
     }
   }
   return content ? field('SECURITY · HOMEBREW', content, true) : '';
@@ -187,8 +184,7 @@ function section(type, items) {
 function refreshSecurityFilter() {
   const button = $('security-filter');
   const count = securityReviewCount;
-  // Keep the active filter available when a new report removes its last finding.
-  button.hidden = count === 0 && state.filter !== 'security';
+  button.hidden = count === 0;
   button.textContent = `Security review ${count}`;
 }
 function refreshInventoryControls() {
@@ -380,11 +376,12 @@ window.setSecurityCheck = function (report, snapshotID, deliverySequence) {
   lastSecurityDeliverySequence = deliverySequence;
   const view = captureInventoryView();
   brewData.securityCheck = report;
+  const previousFilter = state.filter;
   updateSecurityFindings(report);
   const visible = new Set([...document.querySelectorAll('.package-row')].map(row => row.dataset.key));
   const filtered = state.filter === 'security'
     ? allPackages.filter(p => matches(p, state.query.trim().toLowerCase())) : null;
-  if (filtered && (filtered.length !== visible.size || filtered.some(p => !visible.has(key(p)))))
+  if (state.filter !== previousFilter || (filtered && (filtered.length !== visible.size || filtered.some(p => !visible.has(key(p))))))
     render();
   else {
     patchSecurityRows();

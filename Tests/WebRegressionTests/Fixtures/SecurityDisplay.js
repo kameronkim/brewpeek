@@ -38,9 +38,10 @@ return (() => {
   assert(brewData.securityCheck.error==='<script>error</script>','Removing the display preserves the original diagnostic data');
   state.expanded.add('formula:alpha');render();
   setSecurityCheck({scope:'formulae',status:'incomplete',complete:false,report:{findings:[],skipped_formulae:['alpha'],unscanned_formulae:{'patched':'resolution_error'}}},'scope-details',4);
-  assert(detail(data.formulae[0]).includes('This Formula was not scanned.'),'Unscanned Formula keeps an explicit exception');
+  assert(securityDetail(data.formulae[0])==='','A skipped Formula without findings has no security-only warning');
   assert(!detail(data.formulae[0]).includes('No finding reported'),'Unscanned is not presented as a clean result');
-  assert(detail(data.formulae[2]).includes('resolution_error'),'Individual upstream failure reason retained');
+  assert(securityDetail(data.formulae[2])==='','Resolution failure alone does not add a security field');
+  assert(brewData.securityCheck.report.unscanned_formulae.patched==='resolution_error','Underlying scan metadata retained');
   setSecurityCheck({scope:'formulae',status:'succeeded',complete:true,report:{findings:[]}},'scope-details',5);
   assert(![...document.querySelectorAll('.detail-field')].some(f=>f.querySelector('dt').textContent==='SECURITY · HOMEBREW'),'Empty single-version security field is removed by the live patch');
   return 'PASS WebKit findings/patch/SBOM/scope, escaping, update confirmation, fallback, scoped exceptions and absence of global scan UI';

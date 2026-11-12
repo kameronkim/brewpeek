@@ -11,7 +11,7 @@ return (() => {
   setInventory(input);
     state.expanded.add('formula:demo');render();
     const field=[...document.querySelectorAll('.detail-field')].find(f=>f.querySelector('dt').textContent==='SECURITY · HOMEBREW');
-    assert(!!field===(multi||found),'Only package-specific security information creates a field');
+    assert(!!field===found,'Only package-specific security information creates a field');
     const detailText=field?.textContent || '';
     assert(!document.getElementById('security-note'),'No global scan result for any report state');
     assert(!detailText.includes('No finding reported'),'No repeated empty-finding boilerplate');
@@ -19,7 +19,7 @@ return (() => {
     if(status==='failed') {
       assert(detailText.includes('Previous findings are unconfirmed')===found,'Retained findings carry their uncertainty locally');
     }
-    assert(detailText.includes('every installed version was scanned')===multi,'Per-package scope note is conditional');
+    assert(detailText.includes('every installed version was scanned')===(multi&&found),'Per-version scope note accompanies findings only');
     assert(detailText.includes('Reported version: 1.0')===found,'Only Homebrew-reported version is shown');
     assert(!detailText.includes('2.0'),'Other version coverage is not inferred');
     if(!found)assert(!detailText.includes('Reported version:')&&!detailText.includes('1.0'),'Empty result cannot identify a scanned version');

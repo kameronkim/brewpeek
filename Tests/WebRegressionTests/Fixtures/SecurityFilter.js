@@ -36,8 +36,8 @@ document.querySelector('.package-button').click();
 assert(document.getElementById('packages').textContent.includes('Previous findings are unconfirmed'),'Detail failure warning');
 const filter=document.getElementById('security-filter');filter.focus();
 setSecurityCheck(check([]),'fixture',4);await delay();
-assert(rows()===''&&!filter.hidden&&document.activeElement===filter,'Zero-result active filter/focus preserved');
-assert(filter.textContent==='Security review 0'&&filter.getAttribute('aria-pressed')==='true','Zero count and selection');
+assert(rows()==='formula:alpha,formula:beta,formula:gamma'&&filter.hidden,'Zero findings restore the complete list under existing search/category conditions');
+assert(state.filter==='all'&&document.querySelector('[data-filter="all"]').getAttribute('aria-pressed')==='true','Zero resets to All, like Updates');
 select('all');assert(filter.hidden,'Inactive empty filter hidden');
 // Real layout: retain a visible row and keyboard focus as the toolbar gains a filter.
 const many=Array.from({length:55},(_,i)=>pkg('fixture-'+String(i).padStart(2,'0')));

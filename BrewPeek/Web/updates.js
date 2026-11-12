@@ -199,9 +199,9 @@ function showChecking(message) {
   setUpdateMode('checking');
   $('confirm-title').textContent = message || 'Checking changes…';
   $('confirm-copy').textContent =
-    operationKind === 'version-cleanup' ? 'Checking which old versions Homebrew allows removing. No removal has started.' : operationKind.startsWith('cleanup') ? 'Checking remaining dependencies. No cleanup has started.' : operationKind === 'uninstall'
-      ? 'Checking the installed package and its dependencies. No uninstallation has started.'
-      : 'Checking selected packages and dependencies. No installation has started.';
+    operationKind === 'version-cleanup' ? 'Checking old versions…' : operationKind.startsWith('cleanup') ? 'Checking remaining dependencies…' : operationKind === 'uninstall'
+      ? 'Checking package and dependencies…'
+      : 'Checking packages and dependencies…';
   setConfirmState('checking');
   $('confirm-title').focus({ preventScroll: true });
 }
@@ -269,6 +269,13 @@ function showPlan(plan, changed) {
   operationKind = plan.operation || 'update';
   setUpdateMode('confirming');
   setConfirmState('confirming');
+  const confirmHeaders = document.querySelectorAll('.confirm-table th');
+  const confirmColumns = document.querySelectorAll('.confirm-table col');
+  confirmHeaders[2].hidden = false;
+  confirmColumns.forEach((column, i) => {
+    column.hidden = false;
+    column.style.width = [26, 37, 37][i] + '%';
+  });
   if (operationKind === 'trust') {
     requestedKeys = plan.keys;
     document.querySelector('.confirm-heading .eyebrow').textContent = 'PACKAGE TRUST';
@@ -286,8 +293,9 @@ function showPlan(plan, changed) {
     $('confirm-title').textContent = count ? 'Remove old versions?' : 'No versions to remove';
     $('confirm-copy').textContent = (changed ? 'Installed versions changed. Review them again. ' : '') + 'Choose the versions to remove. Current, linked, pinned, and required versions are kept.';
     const headers = document.querySelectorAll('.confirm-table th');
-    headers[0].textContent = 'Name'; headers[1].textContent = 'Version'; headers[2].textContent = 'Action';
-    $('confirm-list').innerHTML = plan.packages.map(p => `<tr><td>${p.removable ? `<label class="version-choice"><input type="checkbox" data-remove-version="${esc(p.version)}">${esc(p.name)}</label>` : esc(p.name)}<small class="dependency-note">${esc(p.reason)}</small></td><td>${esc(p.version)}</td><td>${p.removable ? 'Remove' : 'Keep'}</td></tr>`).join('');
+    headers[0].textContent = 'Name'; headers[1].textContent = 'Version'; headers[2].hidden = true;
+    confirmColumns[0].style.width = '40%'; confirmColumns[1].style.width = '60%'; confirmColumns[2].hidden = true;
+    $('confirm-list').innerHTML = plan.packages.map(p => `<tr><td>${p.removable ? `<label class="version-choice"><input type="checkbox" data-remove-version="${esc(p.version)}">${esc(p.name)}</label>` : `${esc(p.name)}<small class="dependency-note">${esc(p.reason)}</small>`}</td><td>${esc(p.version)}</td></tr>`).join('');
     $('start').textContent = 'Remove selected versions';
     $('start').disabled = true;
     $('confirm-list').onchange = () => { $('start').disabled = !$('confirm-list').querySelector('[data-remove-version]:checked'); };
@@ -433,7 +441,7 @@ function beginProgress(plan) {
   progressPackages = plan.packages;
   setUpdateMode('running');
   $('operation').innerHTML =
-    `<section class="operation" data-operation="${operationKind}"><p id="operation-copy">${operationKind === 'version-cleanup' ? 'Homebrew is removing only the selected old versions.' : operationKind === 'cleanup' ? 'Homebrew is removing the confirmed remaining dependencies.' : operationKind === 'uninstall' ? 'Homebrew is removing the selected package and any confirmed unused dependencies.' : 'Homebrew controls parallel downloads and installation order.'}</p><div class="progress-track"><div class="progress-fill" id="overall-fill"></div></div><p id="discovered" hidden>Additional related changes detected. The total includes these packages.</p><details id="progress-items"><summary id="progress-count"></summary><div class="bounded-list" id="progress-rows"></div></details><details id="progress-log"><summary>Show activity</summary><pre id="activity-log"></pre></details></section>`;
+    `<section class="operation" data-operation="${operationKind}"><p id="operation-copy"${operationKind === 'update' ? ' hidden' : ''}>${operationKind === 'version-cleanup' ? 'Homebrew is removing only the selected old versions.' : operationKind === 'cleanup' ? 'Homebrew is removing the confirmed remaining dependencies.' : operationKind === 'uninstall' ? 'Homebrew is removing the selected package and any confirmed unused dependencies.' : ''}</p><div class="progress-track"><div class="progress-fill" id="overall-fill"></div></div><p id="discovered" hidden>Additional related changes detected. The total includes these packages.</p><details id="progress-items"><summary id="progress-count"></summary><div class="bounded-list" id="progress-rows"></div></details><details id="progress-log"><summary>Show activity</summary><pre id="activity-log"></pre></details></section>`;
   const phase = operationKind === 'version-cleanup' ? 'VERSION CLEANUP IN PROGRESS' : operationKind === 'cleanup' ? 'CLEANUP IN PROGRESS' : operationKind === 'uninstall' ? 'UNINSTALL IN PROGRESS' : 'UPDATE IN PROGRESS';
   const title = operationKind === 'version-cleanup' ? 'Removing old versions' : operationKind === 'cleanup' ? 'Removing unused dependencies' : operationKind === 'uninstall' ? `Uninstalling ${plan.packages[0].name}` : 'Updating packages';
   renderOperationSummary(phase, title, true);
@@ -612,6 +620,7 @@ window.receiveUpdate = function (event) {
       setUpdateMode('verifying');
       $('operation-phase').textContent = 'VERIFYING RESULTS';
       $('operation-title').textContent = ['uninstall', 'cleanup', 'version-cleanup'].includes(operationKind) ? 'Checking package registrations' : 'Checking installed versions';
+      $('operation-copy').hidden = false;
       $('operation-copy').textContent = ['uninstall', 'cleanup', 'version-cleanup'].includes(operationKind) ? 'Confirming removal before reporting success.' : 'Confirming actual versions before reporting success.';
       paintProgress();
       break;
