@@ -11,13 +11,17 @@ return (() => {
   setInventory(input);
     state.expanded.add('formula:demo');render();
     const field=[...document.querySelectorAll('.detail-field')].find(f=>f.querySelector('dt').textContent==='SECURITY · HOMEBREW');
-    assert(!!field,'Security field rendered');
-    const detailText=field.textContent,note=document.getElementById('security-note').textContent;
-  if(!found)assert(detailText.includes('No finding reported'),'Empty finding message');
-  if(status==='incomplete')assert(detailText.includes('Scan incomplete'),'Incomplete detail warning');
-  if(status==='failed')assert(detailText.includes('Security check failed')&&note.includes('failed'),'Failure detail and note warning');
-    assert(detailText.includes('not per installed version')===multi,'Per-package scope note is conditional');
-    assert(note.includes('does not confirm every installed version')===multi,'Global multi-version scope is conditional');
+    assert(!!field===(multi||found),'Only package-specific security information creates a field');
+    const detailText=field?.textContent || '',note=document.getElementById('security-note').textContent;
+    assert(!detailText.includes('No finding reported'),'No repeated empty-finding boilerplate');
+    assert(!detailText.includes('Scan incomplete'),'Global incomplete state is not repeated per package');
+    if(status==='incomplete')assert(document.querySelector('.security-summary').textContent.includes('Scan incomplete'),'Incomplete state stays visible while details are closed');
+    if(status==='failed') {
+      assert(note.includes('failed'),'Global failure warning');
+      assert(detailText.includes('Previous findings are unconfirmed')===found,'Retained findings carry their uncertainty locally');
+    }
+    assert(detailText.includes('every installed version was scanned')===multi,'Per-package scope note is conditional');
+    assert(note.includes('does not confirm every installed version'),'Global scope is available in Scan details');
     assert(note.includes('complete Formula coverage')===(status==='succeeded'),'Failure/incomplete must not claim completion');
     assert(detailText.includes('Reported version: 1.0')===found,'Only Homebrew-reported version is shown');
     assert(!detailText.includes('2.0'),'Other version coverage is not inferred');
