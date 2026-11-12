@@ -131,40 +131,6 @@ function securityDetail(p) {
   }
   return content ? field('SECURITY · HOMEBREW', content, true) : '';
 }
-function renderSecurityNote() {
-  const check = brewData.securityCheck;
-  const note = $('security-note');
-  note.hidden = !check;
-  if (!check) return;
-  const report = check.report;
-  const findings = report?.findings || [];
-  const open = findings.filter(f => f.vulnerabilities?.length).length;
-  const patched = findings.filter(f => f.patched?.length).length;
-  let summary = open ? `Security review · ${open} ${open === 1 ? 'Formula' : 'Formulae'}` : 'No findings reported';
-  let coverage;
-  if (check.status === 'checking') summary = coverage = 'Checking Formula security information…';
-  else if (check.status === 'unsupported') summary = coverage = 'Security check unavailable in this Homebrew version';
-  else if (check.status === 'failed') summary = coverage = report ? 'Security check failed · Previous findings are unconfirmed' : 'Security check failed';
-  else if (check.status === 'succeeded' && check.complete === true) coverage = 'Homebrew reports complete Formula coverage.';
-  else {
-    summary += ' · Scan incomplete';
-    coverage = 'Scan incomplete. Findings do not cover every installed Formula.';
-  }
-  // Preserve the disclosure node, its open state and keyboard focus during background updates.
-  if (!note.querySelector('.security-summary')) {
-    note.innerHTML = '<div class="security-brief"><span class="security-summary" role="status"></span><details class="scan-details"><summary>Scan details</summary><div class="scan-details-copy"></div></details></div>';
-  }
-  note.querySelector('.security-summary').textContent = summary;
-  const details = [
-    ...(report ? [`${open} ${open === 1 ? 'Formula' : 'Formulae'} with open findings`, `${patched} with findings resolved by Formula patches`] : []),
-    coverage,
-    'This does not confirm every installed version was scanned.',
-    'Casks are not scanned.',
-    'No findings does not guarantee safety.',
-    ...[check.error, check.diagnostic].filter(Boolean),
-  ];
-  note.querySelector('.scan-details-copy').innerHTML = details.map(text => `<p>${esc(text)}</p>`).join('');
-}
 function detail(p) {
   let fields =
     field('CATEGORY', esc(p.category)) +
@@ -275,7 +241,6 @@ function sortBy(col, trigger) {
   restoreInventoryFocus(focus);
 }
 function renderOverview() {
-  renderSecurityNote();
   const env = brewData.environment;
   $('footer-updated').textContent = 'Last updated · ' + env.updated;
   const leafCount = brewData.formulae.filter((p) => p.leaf).length;
@@ -416,7 +381,6 @@ window.setSecurityCheck = function (report, snapshotID, deliverySequence) {
   const view = captureInventoryView();
   brewData.securityCheck = report;
   updateSecurityFindings(report);
-  renderSecurityNote();
   const visible = new Set([...document.querySelectorAll('.package-row')].map(row => row.dataset.key));
   const filtered = state.filter === 'security'
     ? allPackages.filter(p => matches(p, state.query.trim().toLowerCase())) : null;

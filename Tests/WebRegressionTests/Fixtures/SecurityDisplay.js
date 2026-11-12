@@ -7,8 +7,6 @@ return (() => {
   inventoryRefreshState = 'idle'; syncActionAvailability();
   assert(document.querySelectorAll('.security-label').length === 1, 'Only the matched Formula gets a review label');
   assert(!securityFor(data.formulae[1]) && !securityFor(data.casks[0]), 'Tap and Cask identities stay separate');
-  assert(document.getElementById('security-note').textContent.includes('Scan incomplete'), 'Coverage warning visible');
-  assert(document.getElementById('security-note').textContent.includes('Casks are not scanned'), 'Scope visible');
   assert(detail(data.formulae[0]).includes('Installed source unknown'), 'SBOM warning visible');
   assert(detail(data.formulae[2]).includes('Resolved by Formula patch'), 'Patch resolution distinct');
   assert(detail(data.formulae[0]).includes('&lt;img') && !detail(data.formulae[0]).includes('<script>bad'), 'OSV text escaped');
@@ -23,7 +21,6 @@ return (() => {
   }
   data.snapshotID = 'new-inventory';
   data.securityCheck = {scope:'formulae',status:'checking'}; setInventory(data);
-  assert(document.getElementById('security-note').textContent.includes('Checking Formula'), 'Pending scan has a dedicated label');
   const completed = {scope:'formulae',status:'succeeded',complete:true,report:{checked:3,findings:[{formula:'alpha',version:'1',vulnerabilities:[vuln],patched:[]}]}};
   setSecurityCheck(completed, 'old-inventory', 1);
   assert(brewData.securityCheck.status === 'checking' && !document.querySelector('.security-label'), 'Stale result must not replace a new inventory');
@@ -34,25 +31,17 @@ return (() => {
   assert(document.activeElement === search, 'Security refresh preserves user focus');
   assert(document.querySelectorAll('[data-update]').length === 4, 'Security-only update leaves action availability unchanged');
   delete data.securityCheck; setInventory(data);
-  assert(document.getElementById('security-note').hidden, 'Legacy snapshot has no invented security result');
   data.securityCheck = {scope:'formulae',status:'succeeded',complete:true,report:{checked:3,findings:[]}}; setInventory(data);
-  assert(!/\ball\b.*\bsafe\b|secure packages|vulnerability.free/i.test(document.getElementById('security-note').textContent), 'No global safety assertion');
   data.snapshotID = 'scope-details'; setInventory(data);
-  const disclosure = document.querySelector('#security-note details');
-  disclosure.open = true;
-  const disclosureButton = disclosure.querySelector('summary'); disclosureButton.focus();
   setSecurityCheck({scope:'formulae',status:'failed',error:'<script>error</script>',report:data.securityCheck.report},'scope-details',3);
-  assert(document.querySelector('#security-note details')===disclosure && disclosure.open,'Disclosure node and open state survive background result');
-  assert(document.activeElement===disclosureButton,'Disclosure keyboard focus preserved');
-  assert(document.querySelector('.security-summary').textContent==='Security check failed · Previous findings are unconfirmed','Failure remains in the compact summary');
-  assert(!document.querySelector('#security-note script') && document.querySelector('.scan-details-copy').textContent.includes('<script>error</script>'),'Diagnostic text is escaped in visible details');
+  assert(!document.getElementById('security-note') && !document.querySelector('.scan-details'),'No global result, disclosure or replacement error banner');
+  assert(brewData.securityCheck.error==='<script>error</script>','Removing the display preserves the original diagnostic data');
   state.expanded.add('formula:alpha');render();
   setSecurityCheck({scope:'formulae',status:'incomplete',complete:false,report:{findings:[],skipped_formulae:['alpha'],unscanned_formulae:{'patched':'resolution_error'}}},'scope-details',4);
   assert(detail(data.formulae[0]).includes('This Formula was not scanned.'),'Unscanned Formula keeps an explicit exception');
   assert(!detail(data.formulae[0]).includes('No finding reported'),'Unscanned is not presented as a clean result');
   assert(detail(data.formulae[2]).includes('resolution_error'),'Individual upstream failure reason retained');
-  assert(document.querySelector('.security-summary').textContent.includes('No findings reported · Scan incomplete'),'Empty incomplete report does not imply full coverage');
   setSecurityCheck({scope:'formulae',status:'succeeded',complete:true,report:{findings:[]}},'scope-details',5);
   assert(![...document.querySelectorAll('.detail-field')].some(f=>f.querySelector('dt').textContent==='SECURITY · HOMEBREW'),'Empty single-version security field is removed by the live patch');
-  return 'PASS WebKit findings/patch/SBOM/scope, escaping, update confirmation, fallback, compact summary, scoped exceptions and disclosure focus';
+  return 'PASS WebKit findings/patch/SBOM/scope, escaping, update confirmation, fallback, scoped exceptions and absence of global scan UI';
 })()
