@@ -16,6 +16,8 @@ const state = {
 };
 let allPackages = [];
 let securityFindings = new Map();
+let securityReviewCount = 0;
+let lastSecurityDeliverySequence = 0;
 let packageSearch = new Map();
 let sortedPackages = null;
 const $ = (id) => document.getElementById(id);
@@ -70,6 +72,7 @@ function matches(p, query) {
     (state.category === 'all' || p.category === state.category) &&
     (state.filter === 'all' ||
       (state.filter === 'updates' && Boolean(p.availableVersion)) ||
+      (state.filter === 'security' && needsSecurityReview(p)) ||
       state.filter === p.type ||
       (state.filter === 'leaf' && p.type === 'formula' && p.leaf) ||
       (state.filter === 'dependency' && p.type === 'formula' && !p.leaf) ||
@@ -95,52 +98,35 @@ function hasMultipleInstalledVersions(p) {
 function securityFor(p) {
   return p.type === 'formula' ? securityFindings.get(formulaIdentity(key(p).slice(8))) : null;
 }
+function needsSecurityReview(p) {
+  return Boolean(securityFor(p)?.vulnerabilities?.length);
+}
+function updateSecurityFindings(check) {
+  const findings = ['succeeded', 'incomplete'].includes(check?.status) ? check.report?.findings || [] : [];
+  securityFindings = new Map(findings.map(f => [formulaIdentity(f.formula), f]));
+  securityReviewCount = allPackages.filter(needsSecurityReview).length;
+  if (!securityReviewCount && state.filter === 'security') state.filter = 'all';
+}
 function securityDetail(p) {
   if (p.type !== 'formula') return '';
   const check = brewData.securityCheck;
   if (!check) return '';
   const report = check.report;
   const finding = securityFor(p);
+  if (!finding) return '';
   const id = formulaIdentity(key(p).slice(8));
   const includes = names => (names || []).some(name => formulaIdentity(name) === id);
-  let notes = [];
-  if (hasMultipleInstalledVersions(p)) notes.push('Multiple versions are installed. Coverage is reported per Formula, not per installed version.');
-  if (check.status === 'checking') notes.push('Checking Formula security information…');
-  if (check.status === 'unsupported') notes.push('This Homebrew does not support vulnerability scan coverage JSON.');
-  if (check.status === 'failed') notes.push('Security check failed. Any retained findings are unconfirmed.');
-  else if (check.complete === false) notes.push('Scan incomplete. Findings do not cover every installed Formula.');
-  if (includes(report?.skipped_formulae)) notes.push('Not scanned: no supported source URL.');
+  const notes = [];
+  if (report && hasMultipleInstalledVersions(p)) notes.push('Multiple versions are installed. This report does not confirm that every installed version was scanned.');
   if (includes(report?.outdated_without_sbom)) notes.push('Installed source unknown: no SBOM for this old version. Findings may reflect the current Formula recipe.');
-  const reason = Object.entries(report?.unscanned_formulae || {}).find(([name]) => formulaIdentity(name) === id)?.[1];
-  if (reason) notes.push(`Not scanned: ${reason}.`);
-  if (finding) {
-    notes.push(`Reported version: ${finding.version}`);
-    for (const [label, items] of [['Open finding', finding.vulnerabilities], ['Resolved by Formula patch', finding.patched]]) {
-      for (const item of items || []) {
-        notes.push(`${label}: ${item.id} · ${item.severity}${item.summary ? ' · ' + item.summary : ''}${item.fixed_versions?.length ? ' · Reported fixes: ' + item.fixed_versions.join(', ') : ''}`);
-      }
+  let content = notes.map(esc).join('<br>');
+  content += `${content ? '<br><br>' : ''}Reported version: ${esc(finding.version)}`;
+  for (const [label, items] of [['Open finding', finding.vulnerabilities], ['Resolved by Formula patch', finding.patched]]) {
+    for (const item of items || []) {
+      content += `<div class="security-entry"><strong>${esc(label)} · ${esc(item.id)} · ${esc(item.severity)}</strong>${item.summary ? '<br>' + esc(item.summary) : ''}${item.fixed_versions?.length ? '<br>Reported fixes: ' + esc(item.fixed_versions.join(', ')) : ''}</div>`;
     }
-  } else if (report) notes.push('No finding reported for this Formula. This is not a safety guarantee.');
-  return notes.length ? field('SECURITY · HOMEBREW', notes.map(esc).join('<br>'), true) : '';
-}
-function renderSecurityNote() {
-  const check = brewData.securityCheck;
-  const note = $('security-note');
-  note.hidden = !check;
-  if (!check) return;
-  const report = check.report;
-  const findings = report?.findings || [];
-  const open = findings.filter(f => f.vulnerabilities?.length).length;
-  const patched = findings.filter(f => f.patched?.length).length;
-  let text = `Security · ${open} Formulae with open findings · ${patched} with findings resolved by Formula patches`;
-  if (check.status === 'checking') text = 'Checking Formula security information…';
-  else if (check.status === 'unsupported') text = 'Security check unavailable in this Homebrew version';
-  else if (check.status === 'failed') text = report ? text + ' · Check failed; retained findings are unconfirmed' : 'Security check failed';
-  else if (!check.complete) text += ' · Scan incomplete';
-  else text += ' · Homebrew reports complete Formula coverage';
-  if ((brewData.formulae || []).some(hasMultipleInstalledVersions)) text += ' · This does not confirm every installed version was scanned.';
-  note.textContent = text + ' · Formulae only; Casks are not scanned. No safety guarantee.';
-  note.title = [check.error, check.diagnostic].filter(Boolean).join('\n');
+  }
+  return content ? field('SECURITY · HOMEBREW', content, true) : '';
 }
 function detail(p) {
   let fields =
@@ -185,7 +171,7 @@ function detail(p) {
 function row(p) {
   const id = 'detail-' + encodeURIComponent(key(p)),
     open = state.expanded.has(key(p));
-  return `<tr class="package-row" data-key="${esc(key(p))}"><td><button class="package-button" aria-expanded="${open}" aria-controls="${esc(id)}"><span class="chevron" aria-hidden="true">${open ? '−' : '+'}</span><span class="package-name">${highlighted(p.name)}</span>${p.deprecated === true ? '<span class="deprecated-label">DEPRECATED</span>' : ''}${securityFor(p)?.vulnerabilities?.length ? '<span class="security-label">SECURITY REVIEW</span>' : ''}<span class="sr-only"> details</span></button><p class="description">${highlighted(p.type === 'cask' ? [p.displayName, p.description].filter(Boolean).join(' · ') : p.description)}</p></td><td class="version"><div class="version-content"><span class="installed-value" title="${esc(p.version)}">${esc(p.version)}</span>${p.availableVersion ? `<span class="available-version"><span class="available-value" title="${esc(p.availableVersion)}">Available: ${esc(p.availableVersion)}</span></span><button class="update-btn row-update" data-update="${esc(key(p))}">Update</button>` : ''}</div></td>${p.type === 'formula' ? `<td><span class="status ${p.leaf ? 'leaf' : ''}">${status(p)}</span>${p.direct ? '<span class="direct-label">DIRECT</span>' : ''}</td>` : ''}</tr><tr class="detail-row" id="${esc(id)}" ${open ? '' : 'hidden'}><td colspan="${p.type === 'formula' ? 3 : 2}">${open ? detail(p) : ''}</td></tr>`;
+  return `<tr class="package-row" data-key="${esc(key(p))}"><td><button class="package-button" aria-expanded="${open}" aria-controls="${esc(id)}"><span class="chevron" aria-hidden="true">${open ? '−' : '+'}</span><span class="package-name">${highlighted(p.name)}</span>${p.deprecated === true ? '<span class="deprecated-label">DEPRECATED</span>' : ''}${needsSecurityReview(p) ? '<span class="security-label">SECURITY REVIEW</span>' : ''}<span class="sr-only"> details</span></button><p class="description">${highlighted(p.type === 'cask' ? [p.displayName, p.description].filter(Boolean).join(' · ') : p.description)}</p></td><td class="version"><div class="version-content"><span class="installed-value" title="${esc(p.version)}">${esc(p.version)}</span>${p.availableVersion ? `<span class="available-version"><span class="available-value" title="${esc(p.availableVersion)}">Available: ${esc(p.availableVersion)}</span></span><button class="update-btn row-update" data-update="${esc(key(p))}">Update</button>` : ''}</div></td>${p.type === 'formula' ? `<td><span class="status ${p.leaf ? 'leaf' : ''}">${status(p)}</span>${p.direct ? '<span class="direct-label">DIRECT</span>' : ''}</td>` : ''}</tr><tr class="detail-row" id="${esc(id)}" ${open ? '' : 'hidden'}><td colspan="${p.type === 'formula' ? 3 : 2}">${open ? detail(p) : ''}</td></tr>`;
 }
 function countLabel(count, total) {
   return count === total ? `${count} total` : `${count} of ${total}`;
@@ -195,7 +181,21 @@ function section(type, items) {
     total = type === 'formula' ? brewData.formulae.length : brewData.casks.length;
   return `<section class="section" id="${type}"><table class="package-table ${type}" aria-label="${title}"><colgroup>${(type === 'formula' ? [54, 26, 20] : [54, 46]).map((width) => `<col style="width:${width}%">`).join('')}</colgroup><thead><tr class="section-heading-row"><th colspan="${type === 'formula' ? 3 : 2}"><div class="section-title"><h2>${title}</h2><span class="count">${countLabel(items.length, total)}</span></div></th></tr><tr class="sort-heading-row">${(type === 'formula' ? ['name', 'version', 'status'] : ['name', 'version']).map((col) => `<th scope="col" aria-sort="${state.sort === col ? (state.direction === 'asc' ? 'ascending' : 'descending') : 'none'}"><button data-sort="${col}">${col.toUpperCase()} ${state.sort === col ? (state.direction === 'asc' ? '↑' : '↓') : '↕'}</button></th>`).join('')}</tr></thead><tbody>${items.map(row).join('')}</tbody></table>${items.length ? '' : '<p class="empty">No matching packages.</p>'}</section>`;
 }
+function refreshSecurityFilter() {
+  const button = $('security-filter');
+  const count = securityReviewCount;
+  button.hidden = count === 0;
+  button.textContent = `Security review ${count}`;
+}
+function refreshInventoryControls() {
+  refreshSecurityFilter();
+  syncPackageActions();
+}
 function render() {
+  renderPackageList();
+  refreshInventoryControls();
+}
+function renderPackageList() {
   if (
     !sortedPackages ||
     sortedPackages.sort !== state.sort ||
@@ -212,7 +212,7 @@ function render() {
   const visibleTypes =
     state.filter === 'cask'
       ? ['cask']
-      : ['formula', 'leaf', 'dependency', 'direct'].includes(state.filter)
+      : ['formula', 'security', 'leaf', 'dependency', 'direct'].includes(state.filter)
         ? ['formula']
         : ['formula', 'cask'];
   $('packages').innerHTML = visibleTypes
@@ -237,7 +237,6 @@ function sortBy(col, trigger) {
   restoreInventoryFocus(focus);
 }
 function renderOverview() {
-  renderSecurityNote();
   const env = brewData.environment;
   $('footer-updated').textContent = 'Last updated · ' + env.updated;
   const leafCount = brewData.formulae.filter((p) => p.leaf).length;
@@ -310,10 +309,11 @@ $('packages').addEventListener('click', (event) => {
     syncActionAvailability();
   }
 });
-window.setInventory = function (data) {
+window.setInventory = function (data, { preserveView = true } = {}) {
+  const view = preserveView ? captureInventoryView() : null;
   brewData = data;
-  securityFindings = new Map((data.securityCheck?.report?.findings || []).map(f => [formulaIdentity(f.formula), f]));
   allPackages = [...data.formulae, ...data.casks];
+  updateSecurityFindings(data.securityCheck);
   // Snapshot replacement also invalidates cached metadata and package order.
   packageSearch = new Map(
     allPackages.map((p) => [
@@ -338,15 +338,54 @@ window.setInventory = function (data) {
     category.value = 'all';
   }
   render();
+  refreshInventoryStatus();
+  if (view) restoreInventoryView(view);
 };
 
-// Only patch security information; preserve package selection, filters, focus and scroll.
-window.setSecurityCheck = function (report, snapshotID) {
+// Patch security content in place unless the selected filter's membership changes.
+function patchSecurityRows() {
+  const packages = new Map(allPackages.map(p => [key(p), p]));
+  for (const row of document.querySelectorAll('.package-row')) {
+    const p = packages.get(row.dataset.key);
+    if (!p || p.type !== 'formula') continue;
+    const button = row.querySelector('.package-button');
+    const label = button.querySelector('.security-label');
+    if (needsSecurityReview(p) && !label) {
+      const badge = document.createElement('span');
+      badge.className = 'security-label';
+      badge.textContent = 'SECURITY REVIEW';
+      button.insertBefore(badge, button.querySelector('.sr-only'));
+    } else if (!needsSecurityReview(p)) label?.remove();
+    const detailRow = row.nextElementSibling;
+    if (detailRow.hidden) continue;
+    const fields = detailRow.querySelector('dl');
+    const previous = [...fields.querySelectorAll('.detail-field')].find(
+      field => field.querySelector('dt').textContent === 'SECURITY · HOMEBREW'
+    );
+    const content = securityDetail(p);
+    if (previous) {
+      if (content) previous.outerHTML = content;
+      else previous.remove();
+    } else if (content) fields.insertAdjacentHTML('beforeend', content);
+  }
+}
+window.setSecurityCheck = function (report, snapshotID, deliverySequence) {
   if (brewData?.snapshotID !== snapshotID) return;
+  if (!Number.isSafeInteger(deliverySequence) || deliverySequence <= lastSecurityDeliverySequence) return;
+  // Do not reset for setInventory: revisiting a snapshot must not revive queued calls.
+  lastSecurityDeliverySequence = deliverySequence;
   const view = captureInventoryView();
   brewData.securityCheck = report;
-  securityFindings = new Map((report.report?.findings || []).map(f => [formulaIdentity(f.formula), f]));
-  renderSecurityNote();
-  render();
+  const previousFilter = state.filter;
+  updateSecurityFindings(report);
+  const visible = new Set([...document.querySelectorAll('.package-row')].map(row => row.dataset.key));
+  const filtered = state.filter === 'security'
+    ? allPackages.filter(p => matches(p, state.query.trim().toLowerCase())) : null;
+  if (state.filter !== previousFilter || (filtered && (filtered.length !== visible.size || filtered.some(p => !visible.has(key(p))))))
+    render();
+  else {
+    patchSecurityRows();
+    refreshInventoryControls();
+  }
   restoreInventoryView(view);
 };

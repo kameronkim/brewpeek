@@ -33,7 +33,7 @@ extension DesktopApp {
     _ plan: PackageOperationPlan, requestID: String, changed: Bool = false
   ) {
     guard finishPreparation(requestID) else { return }
-    operationPlan = plan
+    operation.plan = plan
     var event: Record = ["kind": "plan", "plan": plan.record, "requestID": requestID]
     if changed { event["changed"] = true }
     sendUpdate(event)
@@ -61,8 +61,8 @@ extension DesktopApp {
       return false
     }
     suspendSecurityForOperation()
-    operationPhase = .running
-    preparationControl = nil
+    operation.phase = .running
+    operation.control = nil
     sendUpdate(["kind": "started", "plan": record, "requestID": requestID])
     return true
   }

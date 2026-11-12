@@ -48,7 +48,12 @@ struct VersionCleanup {
       formula.installed_kegs.sort_by(&:version).map do |keg|
         path = Pathname.new(keg)
         receipt = path/"INSTALL_RECEIPT.json"
-        identity = [path.to_s, path.stat.ino, Digest::SHA256.file(receipt).hexdigest,
+        receipt_identity = begin
+          Digest::SHA256.file(receipt).hexdigest
+        rescue Errno::ENOENT
+          "missing"
+        end
+        identity = [path.to_s, path.stat.ino, receipt_identity,
                     keg.linked?, keg.optlinked?].join("|")
         {"version" => keg.version.to_s, "fingerprint" => identity,
          "removable" => eligible.include?(keg)}

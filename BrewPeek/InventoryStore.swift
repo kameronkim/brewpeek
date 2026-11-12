@@ -89,7 +89,8 @@ enum InventoryStore {
       environment[field] = try text(environment, field)
     }
     for field in ["cellarSize", "caskSize"] { environment[field] = try number(environment, field) }
-    value["securityCheck"] = FormulaSecurity.normalize(value["securityCheck"])
+    // Ignore legacy scan results; every app session obtains its own report.
+    value.removeValue(forKey: "securityCheck")
     value["environment"] = environment
     return value
   }
@@ -108,6 +109,7 @@ enum InventoryStore {
   static func displaySnapshot(_ value: Record) -> Record {
     var snapshot = value
     snapshot.removeValue(forKey: "sizeCache")
+    snapshot["securityCheck"] = ["scope": "formulae", "status": "checking"]
     return snapshot
   }
   static func migrateLegacy(to url: URL) throws {

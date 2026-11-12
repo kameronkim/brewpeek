@@ -82,6 +82,14 @@ struct PackageRemoval {
       break if remaining.size == removable.size
       removable = remaining
     end
+    # Candidates may have been kept by scope, pins, exclusions or dependent checks.
+    # Preserve their build dependencies too, using the complete post-selection set.
+    # Older Homebrew cannot verify this final rule: skip dependency removal there.
+    removable = if Utils::Autoremove.respond_to?(:formulae_safe_to_remove)
+      Utils::Autoremove.formulae_safe_to_remove(removable, Formula.installed - [selected_formula])
+    else
+      []
+    end
     names = removable.map(&:full_name).sort
     puts JSON.generate({"dependencies" => names, "blocked" => blocked.uniq.sort})
     """#
@@ -208,15 +216,16 @@ struct PackageRemoval {
         && !plan.dependencies.isEmpty
       {
         states[package.id] = "Uninstalled"
-        let eligible = Set(
-          try eligibleDependencies(package: package, scope: plan.dependencies.map(\.fullName))
-        )
-        let targets = plan.dependencies.filter { p in
-          guard eligible.contains(p.fullName),
-            let actual = remaining.first(where: { $0.id == p.id })
-          else { return false }
+        let unchanged = plan.dependencies.filter { p in
+          guard let actual = remaining.first(where: { $0.id == p.id }) else { return false }
           return actual.current == p.current && actual.receipt == p.receipt
         }
+        // A changed dependency stays installed and can still need another candidate.
+        // Project against the final receipt-matched scope, not the original plan.
+        let eligible = Set(
+          try eligibleDependencies(package: package, scope: unchanged.map(\.fullName))
+        )
+        let targets = unchanged.filter { eligible.contains($0.fullName) }
         kept = Set(
           plan.dependencies.filter { p in !targets.contains(where: { $0.id == p.id }) }.map(\.id))
         for p in targets {

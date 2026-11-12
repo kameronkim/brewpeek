@@ -41,6 +41,7 @@ Enter a package name or description in **Search packages...**. Use **All categor
 |---|---|
 | All | All installed packages |
 | Updates | Packages with an available update; shown with a count only when updates are available |
+| Security review | Formulae with open vulnerability findings reported by Homebrew |
 | Formula | Formula packages |
 | Cask | Cask packages |
 | Leaf | Formulae marked as leaves |
@@ -60,6 +61,7 @@ The package list uses the following version information and labels.
 | Version | The installed version |
 | Available | The new version when Homebrew reports an available update |
 | DEPRECATED | A package that Homebrew has deprecated |
+| SECURITY REVIEW | A formula with open vulnerability findings reported by Homebrew |
 
 Click a package row to expand the following details. Click it again to collapse them.
 
@@ -71,6 +73,7 @@ Click a package row to expand the following details. Click it again to collapse 
 | Used by · Installed formulae | Installed formulae that depend on this package |
 | Disk usage / Installed path | The size and location of the Homebrew installation |
 | Actual app | For casks with an app bundle, the detected app's version, location, and size |
+| Security · Homebrew | The reported version, vulnerability IDs, severity, descriptions, and reported fixes. Findings resolved by Formula patches are listed separately. |
 
 For casks, the Homebrew installation and the actual app bundle are shown separately, so you can inspect both the Caskroom record and the app itself.
 

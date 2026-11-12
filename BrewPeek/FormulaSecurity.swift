@@ -126,27 +126,4 @@ enum FormulaSecurity {
     return value
   }
 
-  /// Corrupt optional security metadata must never prevent ordinary inventory from loading.
-  static func normalize(_ value: Any?) -> Record? {
-    guard let value else { return nil }
-    guard let value = value as? Record,
-      let state = value["status"] as? String,
-      ["checking", "succeeded", "incomplete", "unsupported", "failed"].contains(state),
-      value["scope"] as? String == "formulae" else { return failure("Saved security information is invalid. Refresh to check again.") }
-    if let report = value["report"] {
-      guard let report = report as? Record, validReport(report) else {
-        return failure("Saved security information is invalid. Refresh to check again.")
-      }
-    } else if ["succeeded", "incomplete"].contains(state) {
-      return failure("Saved security information is incomplete. Refresh to check again.")
-    }
-    // Recheck coverage invariants even for a saved snapshot.
-    var normalized = value
-    if let report = value["report"] as? Record {
-      let complete = isComplete(report)
-      normalized["complete"] = complete
-      if state == "succeeded" && !complete { normalized["status"] = "incomplete" }
-    }
-    return normalized
-  }
 }

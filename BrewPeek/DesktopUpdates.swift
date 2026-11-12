@@ -4,8 +4,8 @@ import WebKit
 extension DesktopApp {
   func sendUpdate(_ event: Record) {
     if let snapshot = event["snapshot"] as? Record { observeSecuritySnapshot(snapshot) }
-    rememberWebOperationEvent(event)
-    if recoveringWebContent {
+    webRecovery.remember(event)
+    if webRecovery.isRecovering {
       reloadTerminatedWebContentIfReady()
       return
     }
@@ -25,8 +25,8 @@ extension DesktopApp {
   func handleUpdate(_ body: Any) {
     guard let request = body as? Record, let action = request["action"] as? String else { return }
     if action == "dismissResults" {
-      guard !busy, !hasOperationPlan else { return }
-      lastOperationResult = nil
+      guard !busy, !operation.hasPlan else { return }
+      webRecovery.lastResult = nil
       return
     }
     if action == "cancel" {
@@ -36,13 +36,13 @@ extension DesktopApp {
     guard !busy else { return }
 
     if ["prepare", "prepareUninstall", "prepareVersions"].contains(action),
-      let keys = request["keys"] as? [String] { webRecoveryKeys = keys }
+      let keys = request["keys"] as? [String] { webRecovery.keys = keys }
     switch action {
     case "quitUpdateApps":
       guard let token = request["token"] as? String,
-        let requestID = request["requestID"] as? String, requestID == updateRequestID,
-        case let .update(plan)? = operationPlan, token == plan.token,
-        token == blockedUpdateToken
+        let requestID = request["requestID"] as? String, requestID == operation.requestID,
+        case let .update(plan)? = operation.plan, token == plan.token,
+        token == operation.blockedUpdateToken
       else { return }
       let apps = matchingRunningApps(for: plan.packages).filter {
         $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
@@ -60,7 +60,7 @@ extension DesktopApp {
             : "Some apps could not be asked to quit. Close them manually, then retry.",
       ])
     case "startTrust":
-      guard let token = request["token"] as? String, case let .trust(plan)? = operationPlan,
+      guard let token = request["token"] as? String, case let .trust(plan)? = operation.plan,
         token == plan.token else { return }
       startUpdateTrust(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "prepareVersions":
@@ -68,7 +68,7 @@ extension DesktopApp {
       prepareVersionCleanup(
         key: keys[0], requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "startVersions":
-      guard let token = request["token"] as? String, case let .versions(plan)? = operationPlan,
+      guard let token = request["token"] as? String, case let .versions(plan)? = operation.plan,
         token == plan.token, let selected = request["versions"] as? [String]
       else { return }
       startVersionCleanup(
@@ -77,7 +77,7 @@ extension DesktopApp {
       guard let id = request["recoveryID"] as? String else { return }
       prepareSavedCleanup(id: id, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "startCleanup":
-      guard let token = request["token"] as? String, case let .cleanup(plan)? = operationPlan, token == plan.token
+      guard let token = request["token"] as? String, case let .cleanup(plan)? = operation.plan, token == plan.token
       else { return }
       startSavedCleanup(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "discardCleanup":
@@ -89,7 +89,7 @@ extension DesktopApp {
         key: keys[0], requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "startUninstall":
       guard let token = request["token"] as? String,
-        case let .uninstall(plan)? = operationPlan, token == plan.token
+        case let .uninstall(plan)? = operation.plan, token == plan.token
       else { return }
       startPackageRemoval(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "prepare":
@@ -97,7 +97,7 @@ extension DesktopApp {
       prepareUpdate(keys: keys, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "start":
       guard let token = request["token"] as? String,
-        case let .update(plan)? = operationPlan, token == plan.token
+        case let .update(plan)? = operation.plan, token == plan.token
       else { return }
       startUpdate(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
     default:
@@ -106,15 +106,15 @@ extension DesktopApp {
   }
 
   private func cancelUpdatePreparation() {
-    blockedUpdateToken = nil
-    if updatePreparing {
+    operation.blockedUpdateToken = nil
+    if operation.isPreparing {
       // Keep ownership until the worker acknowledges cancellation; do not admit another task yet.
-      cancelledPreparationRequestID = updateRequestID
-      operationPlan = nil
-      preparationControl?.cancel()
+      operation.cancelledRequestID = operation.requestID
+      operation.plan = nil
+      operation.control?.cancel()
     } else if !busy {
-      updateRequestID = nil
-      operationPlan = nil
+      operation.requestID = nil
+      operation.plan = nil
       sendUpdate(["kind": "cancelled"])
     }
   }
@@ -125,13 +125,7 @@ extension DesktopApp {
     operation: String? = nil, message: String? = nil
   ) -> UpgradePreparation {
     reportLoadID = nil
-    blockedUpdateToken = nil
-    operationPhase = rechecking ? .rechecking : .preparing
-    updateRequestID = requestID
-    cancelledPreparationRequestID = nil
-    operationPlan = nil
-    let control = UpgradePreparation()
-    preparationControl = control
+    let control = self.operation.beginPreparation(requestID: requestID, rechecking: rechecking)
     var event: Record = ["kind": "checking", "requestID": requestID]
     if let operation { event["operation"] = operation }
     if let message { event["message"] = message }
@@ -146,7 +140,7 @@ extension DesktopApp {
   }
 
   private func startUpdate(_ plan: UpgradePlan, requestID: String) {
-    updateRequestID = requestID
+    operation.requestID = requestID
     let active = runningApps(for: plan.packages)
     guard active.isEmpty else {
       reportRunningUpdateApps(active, plan: plan, requestID: requestID)
@@ -219,8 +213,8 @@ extension DesktopApp {
 
   /// Retain the approved plan so Retry rechecks it instead of requesting approval again.
   private func reportRunningUpdateApps(_ names: [String], plan: UpgradePlan, requestID: String) {
-    operationPlan = .update(plan)
-    blockedUpdateToken = plan.token
+    operation.plan = .update(plan)
+    operation.blockedUpdateToken = plan.token
     sendUpdate([
       "kind": "error", "runningApps": names, "retryUpdateToken": plan.token,
       "message": "Close these apps before updating, then retry: " + names.joined(separator: ", "),
@@ -230,34 +224,24 @@ extension DesktopApp {
 
   /// Runs on the main queue, including the final cancellation gate before mutation.
   func isCurrentPreparation(_ requestID: String) -> Bool {
-    updateRequestID == requestID && cancelledPreparationRequestID != requestID
+    operation.ownsPreparation(requestID)
   }
 
   func finishPreparation(_ requestID: String) -> Bool {
-    // An obsolete callback must not release the current worker's state or cancellation control.
-    guard updateRequestID == requestID else { return false }
-    operationPhase = .idle
-    preparationControl = nil
-    if cancelledPreparationRequestID == requestID {
-      cancelledPreparationRequestID = nil
-      updateRequestID = nil
-      operationPlan = nil
+    switch operation.finishPreparation(requestID) {
+    case .obsolete: return false
+    case .cancelled:
       sendUpdate(["kind": "cancelled", "requestID": requestID])
       return false
+    case .ready: return true
     }
-    return true
   }
   /// Complete only the operation that still owns the native state, on the main queue.
   @discardableResult
   func finishPackageOperation(_ event: Record, requestID: String) -> Bool {
-    guard updateRequestID == requestID else { return false }
-    if updatePreparing, !finishPreparation(requestID) { return false }
-    operationPhase = .idle
-    blockedUpdateToken = nil
-    operationPlan = nil
-    preparationControl = nil
-    cancelledPreparationRequestID = nil
-    updateRequestID = nil
+    guard operation.requestID == requestID else { return false }
+    if operation.isPreparing, !finishPreparation(requestID) { return false }
+    guard operation.complete(requestID) else { return false }
     var completed = event
     completed["requestID"] = requestID
     sendUpdate(completed)
@@ -281,13 +265,13 @@ extension DesktopApp {
   }
   private func permitClose() -> Bool {
     guard
-      updateInProgress || hasOperationPlan
+      operation.isExecuting || operation.hasPlan
     else {
       return true
     }
     sendUpdate([
       "kind": "closeBlocked",
-      "message": updateInProgress
+      "message": operation.isExecuting
         ? "Keep BrewPeek open until Homebrew finishes. Closing now could interrupt the package operation."
         : "Wait for the current operation to finish or cancel the package confirmation before closing BrewPeek."
         ,

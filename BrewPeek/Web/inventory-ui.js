@@ -99,13 +99,6 @@ window.setRefreshState = function (value) {
   refreshInventoryStatus();
   syncActionAvailability();
 };
-const replaceInventory = window.setInventory;
-window.setInventory = function (data, { preserveView = true } = {}) {
-  const view = preserveView ? captureInventoryView() : null;
-  replaceInventory(data);
-  refreshInventoryStatus();
-  if (view) restoreInventoryView(view);
-};
 window.focusPackageSearch = function () {
   if (document.querySelector('dialog[open]')) return;
   $('search').focus({ preventScroll: true });

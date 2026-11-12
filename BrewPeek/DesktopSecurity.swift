@@ -3,7 +3,6 @@ import WebKit
 
 struct SecuritySnapshotContext {
   let id: String
-  let destination: URL
 }
 
 extension DesktopApp {
@@ -11,7 +10,6 @@ extension DesktopApp {
     let old = securityInventory
     securityInventory = nil
     securityContext = nil
-    securityGeneration?.invalidate()
     securityGeneration = nil
     interruptedSecurityContext = nil
     latestSecurityReport = nil
@@ -24,7 +22,7 @@ extension DesktopApp {
     cancelSecurityRefresh()
     guard let context else { return nil }
     securityContext = context
-    let owner = SecurityReportGeneration()
+    let owner = UUID()
     securityGeneration = owner
     publishSecurityReport(["scope": "formulae", "status": "checking"], context: context, owner: owner)
     return context
@@ -37,14 +35,14 @@ extension DesktopApp {
     securityContext = context
     startSecurityRefresh([
       "snapshotID": context.id, "securityCheck": ["scope": "formulae", "status": "checking"],
-    ], using: Inventory(brew: brew), at: context.destination)
+    ], using: Inventory(brew: brew))
   }
 
   /// Record the inventory before handing it to WebKit; execution can start before its callback.
-  func observeSecuritySnapshot(_ snapshot: Record, at destination: URL? = nil) {
+  func observeSecuritySnapshot(_ snapshot: Record) {
     guard let id = snapshot["snapshotID"] as? String, securityContext?.id != id else { return }
     cancelSecurityRefresh()
-    securityContext = SecuritySnapshotContext(id: id, destination: destination ?? output)
+    securityContext = SecuritySnapshotContext(id: id)
   }
 
   func suspendSecurityForOperation() {
@@ -60,7 +58,7 @@ extension DesktopApp {
     guard !hasFreshSnapshot, let context, !terminating else { return }
     cancelSecurityRefresh()
     securityContext = context
-    let owner = SecurityReportGeneration()
+    let owner = UUID()
     securityGeneration = owner
     publishSecurityReport([
       "scope": "formulae", "status": "failed",
@@ -68,9 +66,9 @@ extension DesktopApp {
     ], context: context, owner: owner)
   }
 
-  /// Security work owns no mutation/refresh UI state. Its only write is a guarded snapshot patch.
-  func startSecurityRefresh(_ snapshot: Record, using suppliedInventory: Inventory? = nil, at suppliedDestination: URL? = nil) {
-    guard !terminating, operationPhase != .running, inventoryRefreshState != "refreshing",
+  /// Reports live only in this app session; scans never write to the inventory file.
+  func startSecurityRefresh(_ snapshot: Record, using suppliedInventory: Inventory? = nil) {
+    guard !terminating, operation.phase != .running, inventoryRefreshState != "refreshing",
       let snapshotID = snapshot["snapshotID"] as? String,
       securityContext?.id == snapshotID else { return }
     if let latest = latestSecurityReport, latest.snapshotID == snapshotID {
@@ -81,9 +79,9 @@ extension DesktopApp {
       (snapshot["securityCheck"] as? Record)?["status"] as? String == "checking",
       !(securityContext?.id == snapshotID && securityGeneration != nil) else { return }
     cancelSecurityRefresh()
-    let context = SecuritySnapshotContext(id: snapshotID, destination: suppliedDestination ?? output)
+    let context = SecuritySnapshotContext(id: snapshotID)
     securityContext = context
-    let owner = SecurityReportGeneration()
+    let owner = UUID()
     securityGeneration = owner
     let inventory: Inventory
     do { inventory = try suppliedInventory ?? Inventory(brew: Inventory.locateBrew()) }
@@ -106,40 +104,11 @@ extension DesktopApp {
     }
   }
 
-  private func publishSecurityReport(_ report: Record, context: SecuritySnapshotContext, owner: SecurityReportGeneration) {
-    latestSecurityReport = (context.id, report)
-    deliverSecurityReport(report, snapshotID: context.id)
-    persistSecurityReport(report, context: context, owner: owner)
-  }
-
-  /// Contention is temporary, not a scan failure. Retry only persistence, until ownership changes.
-  private func persistSecurityReport(
-    _ report: Record, context: SecuritySnapshotContext, owner: SecurityReportGeneration, retryDelay: TimeInterval = 0.1
-  ) {
+  private func publishSecurityReport(_ report: Record, context: SecuritySnapshotContext, owner: UUID) {
     guard securityGeneration == owner, !terminating else { return }
-    DispatchQueue.global(qos: .utility).async {
-      let result = Result { try SecurityReportStore.update(report, snapshotID: context.id, at: context.destination, generation: owner) }
-      DispatchQueue.main.async {
-        guard self.securityGeneration == owner, !self.terminating else { return }
-        switch result {
-        case .failure(let error):
-          if case HomebrewOperationLock.Failure.busy = error {
-            DispatchQueue.main.asyncAfter(deadline: .now() + retryDelay) {
-              self.persistSecurityReport(report, context: context, owner: owner, retryDelay: min(2, retryDelay * 2))
-            }
-            return
-          }
-          var failure = report
-          failure["status"] = "failed"
-          failure["error"] = "Could not save the security report. Refresh to check again."
-          self.latestSecurityReport = (context.id, failure)
-          self.deliverSecurityReport(failure, snapshotID: context.id)
-        case .success:
-          break // A mismatched/missing snapshot must not be recreated or overwritten.
-        }
-        self.securityGeneration = nil
-      }
-    }
+    latestSecurityReport = (context.id, report)
+    securityGeneration = nil
+    deliverSecurityReport(report, snapshotID: context.id)
   }
 
   func restoreSecurityReport() {
@@ -149,10 +118,13 @@ extension DesktopApp {
   }
 
   private func deliverSecurityReport(_ report: Record, snapshotID: String) {
-    guard pageReady, !recoveringWebContent else { return }
+    guard pageReady, !webRecovery.isRecovering else { return }
+    // Keep a page-independent high-water mark: queued WebKit calls cannot revoke
+    // a newer delivery, even when trust refresh keeps the same snapshot ID.
+    securityDeliverySequence += 1
     web.callAsyncJavaScript(
-      "window.setSecurityCheck(report, snapshotID)",
-      arguments: ["report": report, "snapshotID": snapshotID], in: nil, in: .page
+      "window.setSecurityCheck(report, snapshotID, deliverySequence)",
+      arguments: ["report": report, "snapshotID": snapshotID, "deliverySequence": securityDeliverySequence], in: nil, in: .page
     ) { result in
       if case .failure(let error) = result { NSLog("Security UI delivery failed: %@", error.localizedDescription) }
     }
