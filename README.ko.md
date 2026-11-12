@@ -41,6 +41,7 @@ Homebrew가 설치된 Apple Silicon Mac에서 사용할 수 있습니다. [GitHu
 |---|---|
 | All | 설치된 전체 패키지 |
 | Updates | 새 버전이 있는 패키지. 대상이 있을 때만 개수와 함께 표시 |
+| Security review | Homebrew가 보고한 미해결 취약점 항목이 있는 Formula |
 | Formula | Formula 패키지 |
 | Cask | Cask 패키지 |
 | Leaf | Leaf로 분류된 Formula |
@@ -60,6 +61,7 @@ Updates에는 Formula와 Cask가 함께 표시됩니다. 새로고침 후 업데
 | Version | 설치된 버전 |
 | Available | Homebrew가 업데이트 대상으로 판단한 패키지의 새 버전 |
 | DEPRECATED | Homebrew에서 사용 중단 예정으로 표시한 패키지 |
+| SECURITY REVIEW | Homebrew가 보고한 미해결 취약점 항목이 있는 Formula |
 
 패키지 행을 누르면 아래 상세 정보가 펼쳐지고, 다시 누르면 접힙니다.
 
@@ -71,6 +73,7 @@ Updates에는 Formula와 Cask가 함께 표시됩니다. 새로고침 후 업데
 | Used by · Installed formulae | 해당 패키지를 사용하는 설치된 Formula |
 | Disk usage / Installed path | Homebrew 설치 파일의 용량과 경로 |
 | Actual app | 앱 번들이 있는 Cask에서 확인한 실제 앱의 버전·경로·용량 |
+| Security · Homebrew | 보고된 버전과 취약점 식별자·심각도·설명·수정 정보. Formula 패치로 해결된 항목은 따로 표시 |
 
 Cask는 Homebrew 설치 정보와 실제 앱 번들 정보를 나누어 표시합니다. 따라서 Caskroom의 설치 기록과 앱 자체의 상태를 각각 확인할 수 있습니다.
 
