@@ -32,7 +32,6 @@ assert(document.activeElement===search,'Search focus preserved');
 search.value='';search.dispatchEvent(new Event('input'));
 assert(rows()==='formula:gamma','Async new finding replaces list');
 setSecurityCheck(check([finding('gamma')],'failed'),'fixture',3);
-assert(document.getElementById('security-note').textContent.includes('Previous findings are unconfirmed'),'Failed findings uncertainty retained');
 document.querySelector('.package-button').click();
 assert(document.getElementById('packages').textContent.includes('Previous findings are unconfirmed'),'Detail failure warning');
 const filter=document.getElementById('security-filter');filter.focus();

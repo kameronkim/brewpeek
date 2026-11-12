@@ -374,12 +374,6 @@ td:first-child {
   padding: 2px 5px;
   flex: none;
 }
-#security-note { margin-top: 8px; }
-.security-brief { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 16px; }
-.scan-details summary { cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
-.scan-details[open] { flex-basis: 100%; }
-.scan-details-copy { border-left: 1px solid var(--border); margin-top: 10px; padding: 0 16px; }
-.scan-details-copy p { margin: 6px 0; overflow-wrap: anywhere; }
 .security-entry { margin-top: 14px; }
 .security-entry strong { color: var(--text); font-weight: 500; }
 
