@@ -6,6 +6,7 @@ let notesLoadFailed = false;
 
 function packageNoteFields(p) {
   const id = key(p), note = packageNotes.get(id), draft = noteDrafts.get(id);
+  const former = formerNotes(p);
   let content;
   if (draft) {
     content = `<textarea class="note-editor" data-note-action="input" aria-label="My note for ${esc(p.name)}" maxlength="300"${draft.saving ? ' readonly' : ''}>${esc(draft.text)}</textarea>
@@ -20,7 +21,21 @@ function packageNoteFields(p) {
   } else {
     return '';
   }
-  return field('MY NOTE', content, 'full') + (note || draft ? field('DESCRIPTION', esc(packageDescription(p)), true) : '');
+  const history = former.map(([oldID, text]) =>
+    `<div><small>Saved as ${esc(oldID.slice(oldID.indexOf(':') + 1))}</small><p class="note-value">${esc(text)}</p></div>`
+  ).join('');
+  return field('MY NOTE', content + history, 'full') +
+    (note || draft || former.length ? field('DESCRIPTION', esc(packageDescription(p)), true) : '');
+}
+
+function formerNotes(p) {
+  return (p.formerNoteIDs || []).filter(id => packageNotes.has(id)).map(id => [id, packageNotes.get(id)]);
+}
+
+function listNote(p) {
+  if (packageNotes.has(key(p))) return packageNotes.get(key(p));
+  const former = formerNotes(p);
+  return former.length === 1 ? former[0][1] : '';
 }
 
 function removalNote(id) {

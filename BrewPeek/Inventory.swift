@@ -268,7 +268,7 @@ final class Inventory {
 
   func collect(
     refreshMetadata: Bool = true, previous: Record? = nil, invalidatingSizes: Set<String> = [],
-    installedInfo: Record? = nil, includeSecurity: Bool = false
+    installedInfo: Record? = nil, includeSecurity: Bool = false, notesFile: URL? = nil
   ) throws -> Record {
     let updates = checkUpdates(refreshMetadata: refreshMetadata)
     try checkCancellation()
@@ -284,6 +284,7 @@ final class Inventory {
       raw = value
     }
     let installed = try Self.validateInstalledInfo(raw)
+    let formerNotes = formerNoteIDs(in: installed, notesFile: notesFile)
     let formulae = installed.formulae
     let casks = installed.casks
     let leaves = Set(lines(try run(brew, ["leaves"])).map(HomebrewPackageName.formulaIdentity))
@@ -311,7 +312,7 @@ final class Inventory {
         InventorySizeRequest(
           path: cellar + "/" + name, metadata: ["installed": receipts],
           force: invalidatingSizes.contains(id)))
-      formulas.append([
+      var record: Record = [
         "id": id,
         "name": name, "displayName": name, "version": versions.joined(separator: ", "),
         "installedVersions": versions,
@@ -325,7 +326,9 @@ final class Inventory {
         "usedBy": Array(reverse[HomebrewPackageName.formulaIdentity(item.fullName)] ?? []).sorted(),
         "paths": versions.map { cellar + "/" + name + "/" + $0 },
         "size": null, "apps": [Record](),
-      ])
+      ]
+      if let ids = formerNotes[id] { record["formerNoteIDs"] = ids }
+      formulas.append(record)
     }
     var applications: [Record] = []
     for item in casks {
@@ -372,7 +375,7 @@ final class Inventory {
       }
       let version = item.versions.joined(separator: ", ")
       let names = cask["name"] as? [String] ?? [name]
-      applications.append([
+      var record: Record = [
         "id": id,
         "name": name, "displayName": names.joined(separator: " / "), "version": version,
         "availableVersion": nullable(updates.casks[name]),
@@ -382,7 +385,9 @@ final class Inventory {
         "dependencies": (cask["depends_on"] as? Record)?["formula"] ?? [String](), "usedBy": null,
         "paths": [caskroom + "/" + name], "size": null,
         "apps": apps, "appExpected": expected,
-      ])
+      ]
+      if let ids = formerNotes[id] { record["formerNoteIDs"] = ids }
+      applications.append(record)
     }
     sizeRequests += [
       InventorySizeRequest(path: cellar, metadata: [:]),
@@ -445,7 +450,8 @@ final class Inventory {
       busyError: NSLocalizedString(
         "Another inventory collection is in progress. Please try again shortly.", comment: "")
     ) {
-      let snapshot = try collect(previous: try? InventoryStore.load(output))
+      let snapshot = try collect(previous: try? InventoryStore.load(output),
+        notesFile: output.deletingLastPathComponent().appendingPathComponent("notes.json"))
       try checkCancellation()
       try InventoryStore.save(snapshot, to: output)
     }

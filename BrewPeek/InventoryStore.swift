@@ -56,6 +56,14 @@ enum InventoryStore {
           HomebrewPackageName.isValid(String(id.dropFirst(type.count + 1))),
           identities.insert(id).inserted else { throw invalid() }
         package["id"] = id
+        if package["formerNoteIDs"] != nil {
+          let prefix = id.lastIndex(of: "/").map { String(id[...$0]) } ?? type + ":"
+          package["formerNoteIDs"] = try strings(package, "formerNoteIDs").filter { former in
+            guard former != id, former.hasPrefix(prefix) else { return false }
+            let token = String(former.dropFirst(prefix.count))
+            return !token.contains("/") && HomebrewPackageName.isValid(token)
+          }
+        }
         package["category"] = try text(package, "category", fallback: "Other")
         for field in ["displayName", "description", "homepage", "tap", "availableVersion"] {
           if let raw = optional(package, field), !(raw is String) { throw invalid() }

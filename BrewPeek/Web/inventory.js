@@ -68,7 +68,8 @@ function highlighted(value) {
 }
 function matches(p, query) {
   return (
-    (!query || packageSearch.get(p).includes(query) || packageNotes.get(key(p))?.toLowerCase().includes(query)) &&
+    (!query || packageSearch.get(p).includes(query) || packageNotes.get(key(p))?.toLowerCase().includes(query) ||
+      formerNotes(p).some(([id, text]) => id.toLowerCase().includes(query) || text.toLowerCase().includes(query))) &&
     (state.category === 'all' || p.category === state.category) &&
     (state.filter === 'all' ||
       (state.filter === 'updates' && Boolean(p.availableVersion)) ||
@@ -175,7 +176,7 @@ function packageDescription(p) {
 function row(p) {
   const id = 'detail-' + encodeURIComponent(key(p)),
     open = state.expanded.has(key(p));
-  const note = packageNotes.get(key(p));
+  const note = listNote(p);
   return `<tr class="package-row" data-key="${esc(key(p))}"><td><button class="package-button" aria-expanded="${open}" aria-controls="${esc(id)}"><span class="chevron" aria-hidden="true">${open ? '−' : '+'}</span><span class="package-name">${highlighted(p.name)}</span>${p.deprecated === true ? '<span class="deprecated-label">DEPRECATED</span>' : ''}${needsSecurityReview(p) ? '<span class="security-label">SECURITY REVIEW</span>' : ''}<span class="sr-only"> details</span></button><p class="description${note ? ' personal-note' : ''}">${highlighted(note || packageDescription(p))}</p></td><td class="version"><div class="version-content"><span class="installed-value" title="${esc(p.version)}">${esc(p.version)}</span>${p.availableVersion ? `<span class="available-version"><span class="available-value" title="${esc(p.availableVersion)}">Available: ${esc(p.availableVersion)}</span></span><button class="update-btn row-update" data-update="${esc(key(p))}">Update</button>` : ''}</div></td>${p.type === 'formula' ? `<td><span class="status ${p.leaf ? 'leaf' : ''}">${status(p)}</span>${p.direct ? '<span class="direct-label">DIRECT</span>' : ''}</td>` : ''}</tr><tr class="detail-row" id="${esc(id)}" ${open ? '' : 'hidden'}><td colspan="${p.type === 'formula' ? 3 : 2}">${open ? detail(p) : ''}</td></tr>`;
 }
 function countLabel(count, total) {

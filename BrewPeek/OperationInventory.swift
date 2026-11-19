@@ -10,7 +10,8 @@ enum OperationInventory {
       let snapshot = try inventory.collect(
         refreshMetadata: false, previous: try? InventoryStore.load(destination),
         invalidatingSizes: invalidatingSizes,
-        installedInfo: result["verified"] as? Bool == true ? installedInfo : nil)
+        installedInfo: result["verified"] as? Bool == true ? installedInfo : nil,
+        notesFile: destination.deletingLastPathComponent().appendingPathComponent("notes.json"))
       try InventoryStore.save(snapshot, to: destination)
       result["snapshot"] = InventoryStore.displaySnapshot(snapshot)
     } catch { result["refreshError"] = error.localizedDescription }
