@@ -79,6 +79,8 @@ For casks, the Homebrew installation and the actual app bundle are shown separat
 
 Use **Add note** in package details to jot down why you use a package. The list shows the note below the package name, and you can search for its text. Expand the package to see the full note and original description. Use **Edit note** to change it, or save an empty note to remove it. Uninstall confirmations also show notes for packages being removed. Notes stay on this Mac when the inventory refreshes or a package is removed and reinstalled.
 
+Open **Report → Package Notes…** to search all saved notes by package name or note text. Removed packages are marked **Not installed**. Use **Delete note** to remove an individual note.
+
 ## Updating packages
 
 Click **Update** beside a package version, or **Update all** to update all available packages. Update all appears next to Refresh whenever updates are available, even if you are viewing a different filter.

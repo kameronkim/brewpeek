@@ -29,6 +29,7 @@ function removalNote(id) {
 }
 
 function refreshPackageNotes() {
+  renderNotesLibrary();
   if (!brewData) return;
   const view = captureInventoryView();
   render();
@@ -68,6 +69,12 @@ function selectNoteControl(id, action) {
   cell?.querySelector(`[data-note-action="${action}"]`)?.focus({preventScroll: true});
 }
 
+async function savePackageNote(id, text) {
+  const saved = await notesBridge.postMessage({action: 'save', id, text});
+  if (saved) packageNotes.set(id, saved);
+  else packageNotes.delete(id);
+}
+
 $('packages').addEventListener('input', event => {
   if (event.target.dataset.noteAction !== 'input') return;
   const id = event.target.closest('.detail-row').previousElementSibling.dataset.key;
@@ -102,9 +109,7 @@ $('packages').addEventListener('click', async event => {
   draft.error = '';
   refreshNoteEditor(id);
   try {
-    const saved = await notesBridge.postMessage({action: 'save', id, text: draft.text});
-    if (saved) packageNotes.set(id, saved);
-    else packageNotes.delete(id);
+    await savePackageNote(id, draft.text);
     noteDrafts.delete(id);
   } catch (error) {
     draft.error = 'Could not save the note. ' + String(error.message || error);

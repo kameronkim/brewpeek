@@ -345,6 +345,7 @@ window.setInventory = function (data, { preserveView = true } = {}) {
   render();
   refreshInventoryStatus();
   if (view) restoreInventoryView(view);
+  renderNotesLibrary();
 };
 
 // Patch security content in place unless the selected filter's membership changes.
