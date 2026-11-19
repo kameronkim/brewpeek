@@ -10,6 +10,8 @@ function captureInventoryFocus(element = document.activeElement) {
     update: element.hasAttribute('data-update'),
     uninstall: element.hasAttribute('data-uninstall'),
     versions: element.hasAttribute('data-version-cleanup'),
+    noteAction: element.dataset.noteAction,
+    selection: element.matches('textarea[data-note-action]') ? [element.selectionStart, element.selectionEnd] : null,
     sort: element.dataset.sort,
     section: element.closest('.section')?.id
   };
@@ -21,11 +23,14 @@ function restoreInventoryFocus(focus) {
     const row = [...document.querySelectorAll('.package-row')].find(
       (r) => r.dataset.key === focus.key
     );
-    element = focus.versions
+    const noteControl = focus.noteAction && row?.nextElementSibling?.querySelector(
+      '[data-note-action="' + CSS.escape(focus.noteAction) + '"]'
+    );
+    element = noteControl || (focus.versions
       ? row?.nextElementSibling?.querySelector('[data-version-cleanup]:not(:disabled)')
       : focus.uninstall
       ? row?.nextElementSibling?.querySelector('[data-uninstall]:not(:disabled)')
-      : row?.querySelector(focus.update ? '[data-update]:not(:disabled)' : '.package-button');
+      : row?.querySelector(focus.update ? '[data-update]:not(:disabled)' : '.package-button'));
   }
   if (!element && focus.sort) {
     const section = focus.section ? $(focus.section) : document;
@@ -33,6 +38,7 @@ function restoreInventoryFocus(focus) {
   }
   if (!element || element.disabled || !element.getClientRects().length) return;
   element.focus({ preventScroll: true });
+  if (focus.selection && element.matches('textarea')) element.setSelectionRange(...focus.selection);
 }
 function captureInventoryView() {
   const toolbarBottom = document.querySelector('.toolbar').getBoundingClientRect().bottom;

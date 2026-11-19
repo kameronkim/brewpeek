@@ -86,6 +86,8 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     config.preferences.tabFocusesLinks = true
     config.userContentController.add(self, name: "refreshInventory")
     config.userContentController.add(self, name: "packageUpdate")
+    let notes = PackageNotesBridge(page: page, directory: output.deletingLastPathComponent())
+    config.userContentController.addScriptMessageHandler(notes, contentWorld: .page, name: "packageNotes")
     web = WKWebView(frame: .zero, configuration: config)
     web.navigationDelegate = self
     web.allowsBackForwardNavigationGestures = false

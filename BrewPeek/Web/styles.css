@@ -1601,3 +1601,25 @@ html,
 #operation-summary:not([hidden]) + #operation .operation > p:first-child {
   margin-top: 0;
 }
+
+.description.personal-note {
+  color: #bfc4b5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.note-value, .removal-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.note-value { margin: 0 0 7px; font-family: var(--sans); }
+.note-editor {
+  display: block;
+  width: 100%;
+  min-height: 4em;
+  margin-bottom: 7px;
+  padding: 7px;
+  resize: vertical;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font: 13px/1.5 var(--sans);
+}
+.note-editor:focus-visible { outline: 2px solid var(--accent); }
