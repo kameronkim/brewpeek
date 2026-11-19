@@ -23,9 +23,9 @@ function packageNoteFields(p) {
   return field('MY NOTE', content, 'full') + (note || draft ? field('DESCRIPTION', esc(packageDescription(p)), true) : '');
 }
 
-function removalNote(id) {
+function confirmationNote(id) {
   const note = packageNotes.get(id);
-  return `<small class="dependency-note removal-note" data-removal-note="${esc(id)}"${note ? '' : ' hidden'}>${esc(note || '')}</small>`;
+  return `<small class="confirmation-note" data-confirmation-note="${esc(id)}"${note ? '' : ' hidden'}>${esc(note || '')}</small>`;
 }
 
 function refreshPackageNotes() {
@@ -34,8 +34,8 @@ function refreshPackageNotes() {
   const view = captureInventoryView();
   render();
   restoreInventoryView(view);
-  for (const element of document.querySelectorAll('[data-removal-note]')) {
-    const note = packageNotes.get(element.dataset.removalNote);
+  for (const element of document.querySelectorAll('[data-confirmation-note]')) {
+    const note = packageNotes.get(element.dataset.confirmationNote);
     element.textContent = note || '';
     element.hidden = !note;
   }

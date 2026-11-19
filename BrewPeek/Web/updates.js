@@ -312,7 +312,7 @@ function showPlan(plan, changed) {
   if (cleanup) {
     $('confirm-title').textContent = plan.packages.length ? 'Remove remaining dependencies?' : 'No dependencies to remove';
     $('confirm-copy').textContent = (changed ? 'The plan changed. Review it before continuing. ' : '') + `${plan.rootName} is already uninstalled. ${plan.packages.length} unused ${plan.packages.length === 1 ? 'dependency is' : 'dependencies are'} ready to remove.`;
-    $('confirm-list').innerHTML = [...plan.packages, ...(plan.kept || [])].map(p => `<tr><td>${esc(p.name)}<small class="dependency-note">${esc(p.message || p.relationship || p.reason)}</small>${p.action === 'uninstall' ? removalNote(p.id) : ''}</td><td>${esc(p.version)}</td><td>${esc(p.status)}</td></tr>`).join('');
+    $('confirm-list').innerHTML = [...plan.packages, ...(plan.kept || [])].map(p => `<tr><td>${esc(p.name)}<small class="dependency-note">${esc(p.message || p.relationship || p.reason)}</small>${p.action === 'uninstall' ? confirmationNote(p.id) : ''}</td><td>${esc(p.version)}</td><td>${esc(p.status)}</td></tr>`).join('');
     $('start').textContent = plan.packages.length ? 'Remove dependencies' : 'Finish review';
     document.querySelector('.confirm-bottom > p').textContent = 'Shared, directly installed, pinned, and changed installations are kept.';
     document.querySelector('.confirm-scroll').scrollTop = 0;
@@ -331,7 +331,7 @@ function showPlan(plan, changed) {
   $('confirm-list').innerHTML = plan.packages
     .map(
       (p) =>
-        `<tr><td>${esc(p.name)}<small class="dependency-note">${esc(notes.get(p.id))}</small>${operationKind === 'uninstall' ? removalNote(p.id) : ''}</td><td>${p.action === 'install' ? 'Not installed' : esc(p.version)}</td><td>${esc(p.availableVersion)}</td></tr>`
+        `<tr><td>${esc(p.name)}<small class="dependency-note">${esc(notes.get(p.id))}</small>${confirmationNote(p.id)}</td><td>${p.action === 'install' ? 'Not installed' : esc(p.version)}</td><td>${esc(p.availableVersion)}</td></tr>`
     )
     .join('');
   document.querySelector('.confirm-scroll').scrollTop = 0;

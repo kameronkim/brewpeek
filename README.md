@@ -77,7 +77,7 @@ Click a package row to expand the following details. Click it again to collapse 
 
 For casks, the Homebrew installation and the actual app bundle are shown separately, so you can inspect both the Caskroom record and the app itself.
 
-Use **Add note** in package details to jot down why you use a package. The list shows the note below the package name, and you can search for its text. Expand the package to see the full note and original description. Use **Edit note** to change it, or save an empty note to remove it. Uninstall confirmations also show notes for packages being removed. Notes stay on this Mac when the inventory refreshes or a package is removed and reinstalled.
+Use **Add note** in package details to jot down why you use a package. The list shows the note below the package name, and you can search for its text. Expand the package to see the full note and original description. Use **Edit note** to change it, or save an empty note to remove it. Update and uninstall confirmations show saved notes below each affected package, including dependencies. Notes stay on this Mac when the inventory refreshes or a package is removed and reinstalled.
 
 Open **Report → Package Notes…** to search all saved notes by package name or note text. Removed packages are marked **Not installed**. Use **Delete note** to remove an individual note.
 

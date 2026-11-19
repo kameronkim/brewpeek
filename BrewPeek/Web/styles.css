@@ -1608,7 +1608,8 @@ html,
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.note-value, .removal-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.note-value, .confirmation-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.confirmation-note { display: block; margin-top: 4px; color: #c5cbbd; font: 13px/1.5 var(--sans); }
 .note-value { margin: 0 0 7px; font-family: var(--sans); }
 .note-editor {
   display: block;
