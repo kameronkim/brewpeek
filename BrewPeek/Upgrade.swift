@@ -359,7 +359,7 @@ final class Upgrade {
     return Set(newReceipts).isSubset(of: Set(oldReceipts))
   }
 
-  func execute(_ plan: UpgradePlan, event: @escaping (Record) -> Void) throws -> Record {
+  func execute(_ plan: UpgradePlan, quitApps: Set<QuitCaskApp> = [], event: @escaping (Record) -> Void) throws -> Record {
     let before = try installed()
     let beforeByID = Dictionary(uniqueKeysWithValues: before.map { ($0.id, $0) })
     var items = plan.packages
@@ -568,10 +568,16 @@ final class Upgrade {
       r["actualVersion"] = actual?.current.joined(separator: ", ") ?? "Not installed"
       return r
     }
-    return [
+    var completed: Record = [
       "kind": "result", "packages": records, "details": result.1, "verified": true,
       "exitCode": result.0, "commandWarning": commandWarning,
     ]
+    if !quitApps.isEmpty {
+      let updated = records.compactMap { $0["outcome"] as? String == "updated" ? $0["id"] as? String : nil }
+      let targets = QuitCaskApp.targets(for: quitApps, updatedIDs: Set(updated), installed: afterByID)
+      if !targets.isEmpty { completed["reopenApps"] = targets }
+    }
+    return completed
   }
   static func withLock<T>(at output: URL, _ action: () throws -> T) throws -> T {
     try HomebrewOperationLock.withLock(at: output, action)

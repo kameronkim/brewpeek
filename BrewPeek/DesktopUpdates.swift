@@ -38,6 +38,10 @@ extension DesktopApp {
     if ["prepare", "prepareUninstall", "prepareVersions"].contains(action),
       let keys = request["keys"] as? [String] { webRecovery.keys = keys }
     switch action {
+    case "reopenUpdatedApp":
+      guard !operation.hasPlan, let token = request["token"] as? String,
+        let resultID = request["resultID"] as? String else { return }
+      reopenUpdatedApp(token: token, resultID: resultID)
     case "quitUpdateApps":
       guard let token = request["token"] as? String,
         let requestID = request["requestID"] as? String, requestID == operation.requestID,
@@ -45,11 +49,16 @@ extension DesktopApp {
         token == operation.blockedUpdateToken
       else { return }
       let apps = matchingRunningApps(for: plan.packages).filter {
-        $0.processIdentifier != ProcessInfo.processInfo.processIdentifier
+        $0.app.processIdentifier != ProcessInfo.processInfo.processIdentifier
       }
       var declined: [String] = []
-      for app in apps {
-        if !app.terminate() { declined.append(app.localizedName ?? "App") }
+      for (app, packageID, path) in apps {
+        let bundleID = app.bundleIdentifier
+        if !app.terminate() {
+          declined.append(app.localizedName ?? "App")
+        } else if let bundleID {
+          operation.quitRequests[app] = QuitCaskApp(packageID: packageID, path: path, bundleID: bundleID)
+        }
       }
       sendUpdate([
         "kind": "appQuitRequested", "requestID": requestID,
@@ -94,6 +103,7 @@ extension DesktopApp {
       startPackageRemoval(plan, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "prepare":
       guard let keys = request["keys"] as? [String], !keys.isEmpty else { return }
+      operation.quitRequests.removeAll()
       prepareUpdate(keys: keys, requestID: request["requestID"] as? String ?? UUID().uuidString)
     case "start":
       guard let token = request["token"] as? String,
@@ -106,6 +116,7 @@ extension DesktopApp {
   }
 
   private func cancelUpdatePreparation() {
+    if operation.isPreparing || !busy { operation.quitRequests.removeAll() }
     operation.blockedUpdateToken = nil
     if operation.isPreparing {
       // Keep ownership until the worker acknowledges cancellation; do not admit another task yet.
@@ -154,15 +165,15 @@ extension DesktopApp {
         let engine = Upgrade(brew: try Inventory.locateBrew())
         try Upgrade.withLock(at: destination) {
           let fresh = try engine.prepare(keys: plan.selected.map(\.id), control: control)
-          let shouldStart = DispatchQueue.main.sync {
+          let closedApps: Set<QuitCaskApp>? = DispatchQueue.main.sync {
             guard self.acceptRecheckedPlan(
               .update(fresh), unchanged: fresh.fingerprint == plan.fingerprint,
               requestID: requestID
-            ) else { return false }
+            ) else { return nil }
             return self.beginPreparedUpdate(fresh, requestID: requestID)
           }
-          guard shouldStart else { return }
-          var result = try engine.execute(fresh) { event in
+          guard let closedApps else { return }
+          var result = try engine.execute(fresh, quitApps: closedApps) { event in
             var event = event
             event["requestID"] = requestID
             DispatchQueue.main.async { self.sendUpdate(event) }
@@ -196,19 +207,20 @@ extension DesktopApp {
     }
   }
 
-  /// Check the freshly prepared targets on the main queue immediately before mutation.
-  func beginPreparedUpdate(_ plan: UpgradePlan, requestID: String) -> Bool {
+  /// Only processes that actually exited before the upgrade can be offered again.
+  func beginPreparedUpdate(_ plan: UpgradePlan, requestID: String) -> Set<QuitCaskApp>? {
     guard isCurrentPreparation(requestID) else {
       _ = finishPreparation(requestID)
-      return false
+      return nil
     }
     let active = runningApps(for: plan.packages)
     guard active.isEmpty else {
-      guard finishPreparation(requestID) else { return false }
+      guard finishPreparation(requestID) else { return nil }
       reportRunningUpdateApps(active, plan: plan, requestID: requestID)
-      return false
+      return nil
     }
-    return beginPackageExecution(record: plan.record, requestID: requestID)
+    guard beginPackageExecution(record: plan.record, requestID: requestID) else { return nil }
+    return Set(operation.quitRequests.compactMap { $0.key.isTerminated ? $0.value : nil })
   }
 
   /// Retain the approved plan so Retry rechecks it instead of requesting approval again.
@@ -249,18 +261,21 @@ extension DesktopApp {
     return true
   }
 
-  func matchingRunningApps(for packages: [UpgradePackage]) -> [NSRunningApplication] {
-    NSWorkspace.shared.runningApplications.filter { app in
-      guard let url = app.bundleURL else { return false }
-      return packages.contains { package in
-        package.type == "cask" && package.apps.contains { CaskApps.matches($0, running: url) }
+  private func matchingRunningApps(for packages: [UpgradePackage]) -> [(app: NSRunningApplication, packageID: String, path: String)] {
+    NSWorkspace.shared.runningApplications.compactMap { app in
+      guard let url = app.bundleURL else { return nil }
+      for package in packages where package.type == "cask" {
+        if let path = package.apps.first(where: { CaskApps.matches($0, running: url) }) {
+          return (app, package.id, path)
+        }
       }
+      return nil
     }
   }
 
   func runningApps(for packages: [UpgradePackage]) -> [String] {
     Array(Set(matchingRunningApps(for: packages).map {
-      $0.localizedName ?? $0.bundleURL?.deletingPathExtension().lastPathComponent ?? "App"
+      $0.app.localizedName ?? $0.app.bundleURL?.deletingPathExtension().lastPathComponent ?? "App"
     })).sorted()
   }
   private func permitClose() -> Bool {

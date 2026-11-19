@@ -54,6 +54,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   // Inventory refresh, recovery inspection and app removal have separate lifetimes.
   var auxiliaryBusy = false
   var operation = PackageOperationState()
+  var openingApps = Set<String>()
   var webRecovery = WebRecoveryState()
   var busy: Bool { auxiliaryBusy || webRecovery.isRestoring || operation.phase != .idle }
   var recoveryChecked = false

@@ -36,7 +36,7 @@ function syncActionAvailability() {
   bulk.disabled = unavailable;
   $('refresh').disabled = updateBusy() || inventoryRefreshState === 'refreshing';
   document
-    .querySelectorAll('[data-update], [data-uninstall], [data-version-cleanup], [data-retry], #retry-check, #retry-plan, #retry-cleanup, #discard-cleanup')
+    .querySelectorAll('[data-update], [data-uninstall], [data-version-cleanup], [data-retry], [data-reopen], #retry-check, #retry-plan, #retry-cleanup, #discard-cleanup')
     .forEach((b) => (b.disabled = unavailable));
 }
 function setUpdateMode(mode) {
@@ -499,6 +499,16 @@ function paintProgress(processed = processedPackages) {
     }
   }
 }
+function reopenButtons(result, packageID) {
+  if (!result.reopenApps) return '';
+  const apps = Object.entries(result.reopenApps)
+    .filter(([, app]) => app.packageID === packageID)
+    .sort((a, b) => a[1].name.localeCompare(b[1].name));
+  return apps.map(([token, app]) => {
+    const label = 'Reopen ' + app.name;
+    return `<button class="subtle-btn" data-reopen="${esc(token)}" aria-label="${esc(label)}">${apps.length === 1 ? 'Reopen' : esc(label)}</button>`;
+  }).join(' ');
+}
 function paintResult(result) {
   const uninstall = result.operation === 'uninstall';
   const versions = result.operation === 'version-cleanup';
@@ -515,8 +525,13 @@ function paintResult(result) {
   if (!result.verified) notices.push(uninstall ? 'Package registrations could not be checked.' : 'Installed versions could not be checked.');
   if (result.refreshError) notices.push('Inventory refresh failed; use Refresh to try again.');
   $('operation').innerHTML =
-    `<section class="operation">${notices.length ? `<p role="status">${notices.map(esc).join(' ')}</p>` : ''}${result.commandWarning ? `<p role="status">${esc(result.commandWarning)}</p>` : ''}${result.recoveryError ? `<p role="status">${esc(result.recoveryError)}</p>` : ''}${result.recovered ? '<p>Current Homebrew registrations checked. Nothing has resumed automatically.</p>' : ''}${result.recoveryID ? `<div class="dialog-actions recovery-actions">${pending ? '<button class="subtle-btn" id="retry-cleanup">Retry cleanup</button>' : ''}<button class="subtle-btn" id="discard-cleanup">Discard pending cleanup</button></div>${pending ? '<p>Remaining dependencies are checked again before removal. The task stays saved if the app closes.</p>' : ''}` : ''}${issues.length ? `<div class="issues">${issues.map((p) => `<div class="issue-item"><div><strong>${esc(p.name)}</strong><p>${esc(p.message)}</p></div>${!uninstall || (!pending && p.id === result.packages[0].id && p.actualVersion !== 'Not installed') ? `<button class="subtle-btn" data-retry="${esc(p.id)}">Retry</button>` : ''}</div>`).join('')}</div>` : ''}<details><summary>All results · ${result.packages.length}</summary><ul class="result-list bounded-list">${result.packages.map((p) => `<li>${esc(p.name)}<span>${esc(p.message)}<small class="dependency-note">${versions ? 'Version' : uninstall ? 'Registration' : 'Installed'}: ${esc(p.actualVersion)}</small></span></li>`).join('')}</ul></details><details id="result-log"><summary>Show activity</summary><pre></pre></details>${issues.length && result.command ? '<div class="dialog-actions"><button class="subtle-btn" id="terminal-help">View Terminal command</button></div>' : ''}</section>`;
+    `<section class="operation">${notices.length ? `<p role="status">${notices.map(esc).join(' ')}</p>` : ''}${result.commandWarning ? `<p role="status">${esc(result.commandWarning)}</p>` : ''}${result.recoveryError ? `<p role="status">${esc(result.recoveryError)}</p>` : ''}${result.recovered ? '<p>Current Homebrew registrations checked. Nothing has resumed automatically.</p>' : ''}${result.recoveryID ? `<div class="dialog-actions recovery-actions">${pending ? '<button class="subtle-btn" id="retry-cleanup">Retry cleanup</button>' : ''}<button class="subtle-btn" id="discard-cleanup">Discard pending cleanup</button></div>${pending ? '<p>Remaining dependencies are checked again before removal. The task stays saved if the app closes.</p>' : ''}` : ''}${issues.length ? `<div class="issues">${issues.map((p) => `<div class="issue-item"><div><strong>${esc(p.name)}</strong><p>${esc(p.message)}</p></div>${!uninstall || (!pending && p.id === result.packages[0].id && p.actualVersion !== 'Not installed') ? `<button class="subtle-btn" data-retry="${esc(p.id)}">Retry</button>` : ''}</div>`).join('')}</div>` : ''}<details><summary>All results · ${result.packages.length}</summary><ul class="result-list bounded-list">${result.packages.map((p) => `<li>${esc(p.name)}<span>${esc(p.message)}<small class="dependency-note">${versions ? 'Version' : uninstall ? 'Registration' : 'Installed'}: ${esc(p.actualVersion)}</small>${reopenButtons(result, p.id)}</span></li>`).join('')}</ul></details><details id="result-log"><summary>Show activity</summary><pre></pre></details>${issues.length && result.command ? '<div class="dialog-actions"><button class="subtle-btn" id="terminal-help">View Terminal command</button></div>' : ''}</section>`;
   renderOperationSummary(versions ? 'VERSION CLEANUP RESULTS' : uninstall ? 'UNINSTALL RESULTS' : 'UPDATE RESULTS', recoveryTitle || summary, false);
+  for (const button of document.querySelectorAll('[data-reopen]')) {
+    button.onclick = () => postUpdate({
+      action: 'reopenUpdatedApp', token: button.dataset.reopen, resultID: result.requestID
+    });
+  }
   const log = $('result-log');
   let activityRendered = false;
   log.ontoggle = () => {
@@ -638,6 +653,16 @@ window.receiveUpdate = function (event) {
       restoreInventoryView(view);
       syncActionAvailability();
       finishNotice();
+      break;
+    }
+    case 'reopenFinished': {
+      if (!previousResult?.reopenApps?.[event.token] || previousResult.requestID !== event.resultID) break;
+      if (event.message) {
+        showNotice('Could not reopen app', event.message);
+      } else {
+        delete previousResult.reopenApps[event.token];
+        document.querySelector(`[data-reopen="${CSS.escape(event.token)}"]`)?.remove();
+      }
       break;
     }
     case 'appQuitRequested':

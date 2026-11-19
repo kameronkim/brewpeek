@@ -1,4 +1,4 @@
-import Foundation
+import Cocoa
 
 /// Main-queue state owned by the native package worker, including its cancellation gate.
 struct PackageOperationState {
@@ -10,6 +10,7 @@ struct PackageOperationState {
   // Read-only recovery inspection also uses the native preparation control.
   var control: UpgradePreparation?
   var blockedUpdateToken: String?
+  var quitRequests: [NSRunningApplication: QuitCaskApp] = [:]
   var plan: PackageOperationPlan?
   var isPreparing: Bool { phase.isPreparing }
   var isExecuting: Bool { phase.isExecuting }
@@ -68,6 +69,12 @@ struct WebRecoveryState {
       operationKind = plan["operation"] as? String ?? "update"
     }
     if kind == "started" { lastResult = nil }
+    if kind == "reopenFinished", event["message"] == nil,
+      let id = event["resultID"] as? String, lastResult?["requestID"] as? String == id,
+      let token = event["token"] as? String, var targets = lastResult?["reopenApps"] as? [String: Record] {
+      targets.removeValue(forKey: token)
+      lastResult?["reopenApps"] = targets
+    }
     if kind == "result" {
       var result = event
       result.removeValue(forKey: "snapshot")

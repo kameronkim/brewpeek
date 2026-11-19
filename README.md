@@ -81,9 +81,11 @@ For casks, the Homebrew installation and the actual app bundle are shown separat
 
 Click **Update** beside a package version, or **Update all** to update all available packages. Update all appears next to Refresh whenever updates are available, even if you are viewing a different filter.
 
-BrewPeek asks Homebrew to check the changes first. The confirmation table shows each package's **Current** and **New** versions, including related dependencies. Where the relationship is known, **Required by** or **Uses** explains why a related package is included. New dependencies are marked **Not installed**. Close any apps being updated, then review the list and click **Update** to begin.
+BrewPeek asks Homebrew to check the changes first. The confirmation table shows each package's **Current** and **New** versions, including related dependencies. Where the relationship is known, **Required by** or **Uses** explains why a related package is included. New dependencies are marked **Not installed**. Review the list and click **Update** to begin.
 
 Homebrew manages the downloads and installation order. Keep BrewPeek open until the operation finishes.
+
+If an app is running, choose **Quit app**, then **Retry** after it closes. Once its update succeeds, open **View results** and choose **Reopen** beside that app.
 
 If Homebrew requires administrator permission during an update or uninstall, BrewPeek asks for your macOS account password in a secure input window. The password is not saved.
 

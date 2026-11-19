@@ -1,6 +1,40 @@
 import XCTest
 
 final class UpdateActionTests: XCTestCase {
+  func testReopenUsesTheVerifiedAppInTheRetainedResult() throws {
+    let page = try WebTestPage(width: 480)
+    try page.run("""
+      inventoryRefreshState='idle';
+      const row = (id, outcome) => ({id, name:id.split(':')[1], outcome, message:outcome, actualVersion:'2'});
+      restoreUpdateState([{kind:'result', requestID:'done', verified:true,
+        packages:[row('cask:studio','updated'),row('formula:studio','updated'),row('cask:other','failed')],
+        reopenApps:{photo:{packageID:'cask:studio',name:'Photo'},video:{packageID:'cask:studio',name:'Video'}}}]);
+      $('operation-view').click();
+      const rows=document.querySelectorAll('.result-list li');
+      assert(rows[0].querySelectorAll('[data-reopen]').length===2,'Both closed apps available');
+      assert(!rows[1].querySelector('button')&&!rows[2].querySelector('button'),'Only the matching Cask has buttons');
+      const video=rows[0].querySelector('[data-reopen="video"]');
+      assert(video.textContent==='Reopen Video','Distinguishable apps');
+      video.click(); return true;
+      """)
+    try page.wait { page.messages.values.count == 1 }
+    XCTAssertEqual(page.messages.values.first as? [String: String],
+      ["action": "reopenUpdatedApp", "resultID": "done", "token": "video"])
+    try page.run("""
+      receiveUpdate({kind:'reopenFinished',resultID:'old',token:'video'});
+      assert(document.querySelector('[data-reopen="video"]'),'Old callback ignored');
+      receiveUpdate({kind:'reopenFinished',resultID:'done',token:'video',message:'Fixture error'});
+      assert($('notice').open&&document.querySelector('[data-reopen="video"]'),'Can retry a launch failure');
+      $('notice-ok').click();
+      receiveUpdate({kind:'reopenFinished',resultID:'done',token:'video'});
+      assert(!document.querySelector('[data-reopen="video"]')&&document.querySelector('[data-reopen="photo"]'),'Only the opened app is consumed');
+      paintResult(previousResult);
+      assert(document.querySelector('[data-reopen="photo"]').textContent==='Reopen','Single remaining app has a short label');
+      return true;
+      """)
+    XCTAssertEqual(page.messages.values.count, 1)
+  }
+
   func testQuitRequestApprovedRetryAndOrdinaryRetryKeepSeparateActions() throws {
     let page = try WebTestPage(width: 900, height: 760)
     try page.run("""
