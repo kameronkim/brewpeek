@@ -70,7 +70,7 @@ Click a package row to expand the following details. Click it again to collapse 
 | Category / Install origin | The package category and whether a formula was explicitly requested |
 | Homepage / Source tap | The project's website and the repository that provides the package |
 | Dependencies | Packages required by the installed package |
-| Used by · Installed formulae | Installed formulae that depend on this package |
+| Used by · Installed formulae | Installed formulae that depend on this package, with any personal note shown below the corresponding name |
 | Disk usage / Installed path | The size and location of the Homebrew installation |
 | Actual app | For casks with an app bundle, the detected app's version, location, and size |
 | Security · Homebrew | The reported version, vulnerability IDs, severity, descriptions, and reported fixes. Findings resolved by Formula patches are listed separately. |

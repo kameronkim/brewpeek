@@ -1602,13 +1602,17 @@ html,
   margin-top: 0;
 }
 
-.description.personal-note {
+.description.personal-note, .used-by-note {
   color: #bfc4b5;
+}
+.description.personal-note {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.note-value, .removal-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.used-by-list { list-style: none; margin: 0; padding: 0; }
+.used-by-note { display: block; font: 12px/1.5 var(--sans); }
+.note-value, .removal-note, .used-by-note { white-space: pre-wrap; overflow-wrap: anywhere; }
 .note-value { margin: 0 0 7px; font-family: var(--sans); }
 .note-editor {
   display: block;

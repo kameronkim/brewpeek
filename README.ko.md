@@ -70,7 +70,7 @@ Updates에는 Formula와 Cask가 함께 표시됩니다. 새로고침 후 업데
 | Category / Install origin | 패키지 카테고리와 Formula의 직접 설치 요청 여부 |
 | Homepage / Source tap | 프로젝트 홈페이지와 패키지를 제공하는 저장소 |
 | Dependencies | 해당 패키지가 사용하는 의존 패키지 |
-| Used by · Installed formulae | 해당 패키지를 사용하는 설치된 Formula |
+| Used by · Installed formulae | 해당 패키지를 사용하는 설치된 Formula. 메모를 작성한 Formula는 이름 아래에 메모가 표시됩니다. |
 | Disk usage / Installed path | Homebrew 설치 파일의 용량과 경로 |
 | Actual app | 앱 번들이 있는 Cask에서 확인한 실제 앱의 버전·경로·용량 |
 | Security · Homebrew | 보고된 버전과 취약점 식별자·심각도·설명·수정 정보. Formula 패치로 해결된 항목은 따로 표시 |

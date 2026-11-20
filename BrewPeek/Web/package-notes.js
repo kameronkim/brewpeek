@@ -4,6 +4,29 @@ const notesBridge = window.webkit?.messageHandlers?.packageNotes;
 let notesReady = false;
 let notesLoadFailed = false;
 
+// Used by shows short names when unique and Homebrew full names for collisions.
+function indexUsedByFormulae(formulae) {
+  const ids = new Map();
+  for (const p of formulae) ids.set(p.name, ids.has(p.name) ? null : key(p));
+  for (const p of formulae) {
+    const id = key(p);
+    ids.set(id.slice('formula:'.length), id);
+  }
+  return ids;
+}
+
+function usedByWithNotes(names) {
+  if (!names?.length) return '—';
+  const entries = names.map(name => {
+    const note = packageNotes.get(usedByFormulaIDs.get(name));
+    const annotation = note
+      ? `<span class="used-by-note"><span class="sr-only">My note: </span>${esc(note)}</span>`
+      : '';
+    return `<li>${esc(name)}${annotation}</li>`;
+  });
+  return `<ul class="used-by-list">${entries.join('')}</ul>`;
+}
+
 function packageNoteFields(p) {
   const id = key(p), note = packageNotes.get(id), draft = noteDrafts.get(id);
   const former = formerNotes(p);

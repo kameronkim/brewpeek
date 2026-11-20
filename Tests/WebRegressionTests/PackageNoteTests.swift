@@ -2,6 +2,65 @@ import XCTest
 @testable import BrewPeek
 
 final class PackageNoteTests: XCTestCase {
+  func testUsedByShowsNotesForInstalledFormulaIdentitiesAndRefreshesAfterEdits() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = PackageNotes(file: directory.appendingPathComponent("notes.json"))
+    for (id, text) in [
+      ("formula:vendor/tools/jq", "배포 <script>"), ("formula:jq", "Old core note"),
+      ("formula:other/tools/jq", "Other tap"), ("cask:php", "Cask only"),
+    ] {
+      _ = try store.save(id: id, text: text)
+    }
+    let page = try WebTestPage(notesDirectory: directory)
+    try page.run("""
+      const formula = (name, fullName = name) => ({id:'formula:'+fullName,name,type:'formula',version:'1'});
+      const jq = formula('jq','vendor/tools/jq'), php = formula('php');
+      const library = {...formula('oniguruma'),usedBy:['jq','php']};
+      const data = {formulae:[library,jq,php],casks:[{id:'cask:php',name:'php',type:'cask',version:'1',apps:[]}],taps:[],environment:{}};
+      const row = id => document.querySelector('.package-row[data-key="' + id + '"]');
+      const detail = id => row(id).nextElementSibling;
+      const entries = () => [...detail(library.id).querySelectorAll('.used-by-list li')];
+      const waitFor = async predicate => {
+        for (let i=0; i<150; i++) {
+          if (predicate()) return;
+          await new Promise(resolve => setTimeout(resolve, 15));
+        }
+        throw Error('Used by notes did not update');
+      };
+      setInventory(data);
+      row(library.id).querySelector('button').click();
+      await waitFor(() => notesReady);
+      assert(entries().length === 2 && entries()[0].textContent === 'jqMy note: 배포 <script>', 'Unique short label maps to installed tapped formula');
+      assert(entries()[1].textContent === 'php' && !entries()[1].querySelector('.used-by-note'), 'No note line for the unannotated formula despite a same-name cask');
+      assert(!entries()[0].querySelector('script'), 'Note renders as text');
+
+      const refresh = (users, parents) => setInventory({...data,formulae:[{...library,usedBy:users},...parents]});
+      const other = formula('jq','other/tools/jq');
+      refresh(['other/tools/jq','vendor/tools/jq'], [jq,other]);
+      assert(entries()[0].textContent.endsWith('Other tap') && entries()[1].textContent.endsWith('배포 <script>'), 'Two taps with the same short name keep distinct notes');
+      refresh(['jq','vendor/tools/jq'], [formula('jq'),jq]);
+      assert(entries()[0].textContent.endsWith('Old core note'), 'Core full name wins when a tapped formula shares its name');
+      row(jq.id).querySelector('button').click();
+      const edit = text => {
+        detail(jq.id).querySelector('[data-note-action="edit"]').click();
+        const input = detail(jq.id).querySelector('textarea');
+        input.value = text; input.dispatchEvent(new Event('input',{bubbles:true}));
+        detail(jq.id).querySelector('[data-note-action="save"]').click();
+      };
+      edit('Updated note');
+      await waitFor(() => entries()[1]?.textContent.endsWith('Updated note'));
+      edit('');
+      await waitFor(() => entries()[1]?.textContent === 'vendor/tools/jq');
+      refresh([], []);
+      assert(!detail(library.id).querySelector('.used-by-list') &&
+        [...detail(library.id).querySelectorAll('dt')].find(dt=>dt.textContent.startsWith('USED BY')).nextElementSibling.textContent === '—',
+        'An empty relationship keeps its placeholder');
+      return true;
+      """)
+  }
+
   func testNotesSurviveRefreshAndRelaunchAndFollowRemovalIdentities() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }

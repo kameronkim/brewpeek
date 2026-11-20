@@ -15,6 +15,7 @@ const state = {
   expanded: new Set()
 };
 let allPackages = [];
+let usedByFormulaIDs = new Map();
 let securityFindings = new Map();
 let securityReviewCount = 0;
 let lastSecurityDeliverySequence = 0;
@@ -143,7 +144,7 @@ function detail(p) {
     field('HOMEPAGE', safeLink(p.homepage), true) +
     field('SOURCE TAP', esc(p.tap)) +
     field('DEPENDENCIES', list(p.dependencies)) +
-    field('USED BY · INSTALLED FORMULAE', list(p.usedBy)) +
+    field('USED BY · INSTALLED FORMULAE', usedByWithNotes(p.usedBy)) +
     field('DISK USAGE', size(p.size)) +
     field('INSTALLED PATH', list(p.paths), true) + securityDetail(p);
   if (p.type === 'cask') {
@@ -319,6 +320,7 @@ window.setInventory = function (data, { preserveView = true } = {}) {
   const view = preserveView ? captureInventoryView() : null;
   brewData = data;
   allPackages = [...data.formulae, ...data.casks];
+  usedByFormulaIDs = indexUsedByFormulae(data.formulae);
   updateSecurityFindings(data.securityCheck);
   // Snapshot replacement also invalidates cached metadata and package order.
   packageSearch = new Map(
