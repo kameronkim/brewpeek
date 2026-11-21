@@ -25,7 +25,7 @@ enum HomebrewOperationLock {
     }
   }
   static func withLock<T>(
-    at inventory: URL, createDirectory: Bool = true,
+    at inventory: URL, createDirectory: Bool = true, lockName: String = ".homebrew-report.lock",
     openError: String = "Could not open the operation lock.",
     busyError: String = "Another BrewPeek operation is running. Try again when it finishes.",
     _ action: () throws -> T
@@ -33,7 +33,7 @@ enum HomebrewOperationLock {
     let directory = inventory.deletingLastPathComponent()
     if createDirectory { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true) }
     let fd = open(
-      directory.appendingPathComponent(".homebrew-report.lock").path, createDirectory ? O_CREAT | O_RDWR : O_RDWR, 0o600)
+      directory.appendingPathComponent(lockName).path, createDirectory ? O_CREAT | O_RDWR : O_RDWR, 0o600)
     guard fd >= 0 else { throw InventoryError(message: openError) }
     defer { close(fd) }
     guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {

@@ -1,6 +1,7 @@
 import Cocoa
 import WebKit
 import XCTest
+@testable import BrewPeek
 
 /// Hidden real WebKit page. Operation messages are captured, never sent to an app or Homebrew.
 final class WebTestPage {
@@ -15,17 +16,21 @@ final class WebTestPage {
   let web: WKWebView
   private let window: NSWindow
 
-  init(width: CGFloat = 1100, height: CGFloat = 800) throws {
+  init(width: CGFloat = 1100, height: CGFloat = 800, notesDirectory: URL? = nil) throws {
     _ = NSApplication.shared
     let configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = .nonPersistent()
     configuration.userContentController.add(messages, name: "packageUpdate")
+    let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let base = root.appendingPathComponent("BrewPeek/Web")
+    if let notesDirectory {
+      let handler = PackageNotesBridge(page: base.appendingPathComponent("index.html"), directory: notesDirectory)
+      configuration.userContentController.addScriptMessageHandler(handler, contentWorld: .page, name: "packageNotes")
+    }
     web = WKWebView(frame: NSRect(x: 0, y: 0, width: width, height: height), configuration: configuration)
     window = NSWindow(contentRect: web.frame, styleMask: [.titled], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
     window.contentView = web
-    let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-    let base = root.appendingPathComponent("BrewPeek/Web")
     web.loadFileURL(base.appendingPathComponent("index.html"), allowingReadAccessTo: base)
     try wait { !self.web.isLoading }
     try run("if(typeof setInventory!=='function')throw Error('Inventory page did not load'); window.assert=(ok,message)=>{if(!ok)throw Error(message)}; return true;")

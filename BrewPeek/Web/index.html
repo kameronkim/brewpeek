@@ -160,7 +160,22 @@
       <pre id="notice-command" hidden></pre>
       <div class="dialog-actions"><button class="subtle-btn" id="notice-ok">OK</button></div>
     </dialog>
+    <dialog id="notes-library" aria-labelledby="notes-title">
+      <h2 id="notes-title">Package Notes</h2>
+      <label class="searchbox">
+        <span class="search-symbol" aria-hidden="true">⌕</span>
+        <input id="notes-search" type="search" aria-label="Search package names and notes" placeholder="Search notes…" autofocus>
+      </label>
+      <ul id="notes-list" aria-label="Package notes"></ul>
+      <div class="dialog-actions">
+        <p id="notes-status" role="status"></p>
+        <button id="notes-retry" class="subtle-btn" hidden>Retry</button>
+        <button id="notes-done" class="subtle-btn">Done</button>
+      </div>
+    </dialog>
     <script src="inventory-ui.js"></script>
     <script src="updates.js"></script>
+    <script src="notes-library.js"></script>
+    <script src="package-notes.js"></script>
   </body>
 </html>

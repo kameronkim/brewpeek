@@ -70,12 +70,18 @@ Click a package row to expand the following details. Click it again to collapse 
 | Category / Install origin | The package category and whether a formula was explicitly requested |
 | Homepage / Source tap | The project's website and the repository that provides the package |
 | Dependencies | Packages required by the installed package |
-| Used by · Installed formulae | Installed formulae that depend on this package |
+| Used by · Installed formulae | Installed formulae that depend on this package, with any personal note shown below the corresponding name |
 | Disk usage / Installed path | The size and location of the Homebrew installation |
 | Actual app | For casks with an app bundle, the detected app's version, location, and size |
 | Security · Homebrew | The reported version, vulnerability IDs, severity, descriptions, and reported fixes. Findings resolved by Formula patches are listed separately. |
 
 For casks, the Homebrew installation and the actual app bundle are shown separately, so you can inspect both the Caskroom record and the app itself.
+
+Use **Add note** in package details to jot down why you use a package. The list shows the note below the package name, and you can search for its text. Expand the package to see the full note and original description. Use **Edit note** to change it, or save an empty note to remove it. Update and uninstall confirmations show saved notes below each affected package, including dependencies. Notes stay on this Mac when the inventory refreshes or a package is removed and reinstalled.
+
+Open **Report → Package Notes…** to search all saved notes by package name or note text. Removed packages are marked **Not installed**. Use **Delete note** to remove an individual note.
+
+When Homebrew confirms a rename within the same tap, package details also show notes saved under the former name. In **Package Notes**, you can find these notes by either name. You can also search their text and keep a separate note under the current name.
 
 ## Updating packages
 

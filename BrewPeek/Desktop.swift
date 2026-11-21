@@ -86,6 +86,8 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     config.preferences.tabFocusesLinks = true
     config.userContentController.add(self, name: "refreshInventory")
     config.userContentController.add(self, name: "packageUpdate")
+    let notes = PackageNotesBridge(page: page, directory: output.deletingLastPathComponent())
+    config.userContentController.addScriptMessageHandler(notes, contentWorld: .page, name: "packageNotes")
     web = WKWebView(frame: .zero, configuration: config)
     web.navigationDelegate = self
     web.allowsBackForwardNavigationGestures = false
@@ -173,6 +175,11 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
       withTitle: NSLocalizedString("Search Packages", comment: ""), action: #selector(focusSearch),
       keyEquivalent: "f")
     search.target = self
+    reportMenu.addItem(.separator())
+    let notes = reportMenu.addItem(
+      withTitle: NSLocalizedString("Package Notes…", comment: ""), action: #selector(showPackageNotes),
+      keyEquivalent: "")
+    notes.target = self
     NSApp.mainMenu = menu
   }
   func userContentController(
@@ -256,6 +263,13 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   @objc func focusSearch() {
     guard hasDisplayedData else { return }
     web.evaluateJavaScript("window.focusPackageSearch()", completionHandler: nil)
+  }
+  private var canShowPackageNotes: Bool {
+    hasDisplayedData && operation.phase == .idle && !operation.hasPlan && operation.requestID == nil
+  }
+  @objc func showPackageNotes() {
+    guard canShowPackageNotes else { return }
+    web.evaluateJavaScript("window.showPackageNotes()", completionHandler: nil)
   }
   func loadReport() {
     guard pageReady else { return }
@@ -343,6 +357,7 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   }
   func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
     if menuItem.action == #selector(focusSearch) { return hasDisplayedData }
+    if menuItem.action == #selector(showPackageNotes) { return canShowPackageNotes }
     if menuItem.action == #selector(removeApp) || menuItem.action == #selector(refresh) {
       return !busy && !operation.hasPlan
         && operation.requestID == nil

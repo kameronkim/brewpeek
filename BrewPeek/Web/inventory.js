@@ -15,6 +15,7 @@ const state = {
   expanded: new Set()
 };
 let allPackages = [];
+let usedByFormulaIDs = new Map();
 let securityFindings = new Map();
 let securityReviewCount = 0;
 let lastSecurityDeliverySequence = 0;
@@ -68,7 +69,8 @@ function highlighted(value) {
 }
 function matches(p, query) {
   return (
-    (!query || packageSearch.get(p).includes(query)) &&
+    (!query || packageSearch.get(p).includes(query) || packageNotes.get(key(p))?.toLowerCase().includes(query) ||
+      formerNotes(p).some(([id, text]) => id.toLowerCase().includes(query) || text.toLowerCase().includes(query))) &&
     (state.category === 'all' || p.category === state.category) &&
     (state.filter === 'all' ||
       (state.filter === 'updates' && Boolean(p.availableVersion)) ||
@@ -142,7 +144,7 @@ function detail(p) {
     field('HOMEPAGE', safeLink(p.homepage), true) +
     field('SOURCE TAP', esc(p.tap)) +
     field('DEPENDENCIES', list(p.dependencies)) +
-    field('USED BY · INSTALLED FORMULAE', list(p.usedBy)) +
+    field('USED BY · INSTALLED FORMULAE', usedByWithNotes(p.usedBy)) +
     field('DISK USAGE', size(p.size)) +
     field('INSTALLED PATH', list(p.paths), true) + securityDetail(p);
   if (p.type === 'cask') {
@@ -161,6 +163,7 @@ function detail(p) {
       'full'
     );
   }
+  fields += packageNoteFields(p);
   const actions = p.type === 'cask' || p.direct === true
     ? `<button class="subtle-btn uninstall-btn" data-uninstall="${esc(key(p))}">Uninstall</button>`
     : '';
@@ -168,10 +171,14 @@ function detail(p) {
     ? `<button class="subtle-btn" data-version-cleanup="${esc(key(p))}">Manage versions</button>` : '';
   return `<div class="details-grid"><dl style="display:contents">${fields}</dl>${versions || actions ? `<div class="detail-actions">${versions}${actions}</div>` : ''}</div>`;
 }
+function packageDescription(p) {
+  return p.type === 'cask' ? [p.displayName, p.description].filter(Boolean).join(' · ') : p.description;
+}
 function row(p) {
   const id = 'detail-' + encodeURIComponent(key(p)),
     open = state.expanded.has(key(p));
-  return `<tr class="package-row" data-key="${esc(key(p))}"><td><button class="package-button" aria-expanded="${open}" aria-controls="${esc(id)}"><span class="chevron" aria-hidden="true">${open ? '−' : '+'}</span><span class="package-name">${highlighted(p.name)}</span>${p.deprecated === true ? '<span class="deprecated-label">DEPRECATED</span>' : ''}${needsSecurityReview(p) ? '<span class="security-label">SECURITY REVIEW</span>' : ''}<span class="sr-only"> details</span></button><p class="description">${highlighted(p.type === 'cask' ? [p.displayName, p.description].filter(Boolean).join(' · ') : p.description)}</p></td><td class="version"><div class="version-content"><span class="installed-value" title="${esc(p.version)}">${esc(p.version)}</span>${p.availableVersion ? `<span class="available-version"><span class="available-value" title="${esc(p.availableVersion)}">Available: ${esc(p.availableVersion)}</span></span><button class="update-btn row-update" data-update="${esc(key(p))}">Update</button>` : ''}</div></td>${p.type === 'formula' ? `<td><span class="status ${p.leaf ? 'leaf' : ''}">${status(p)}</span>${p.direct ? '<span class="direct-label">DIRECT</span>' : ''}</td>` : ''}</tr><tr class="detail-row" id="${esc(id)}" ${open ? '' : 'hidden'}><td colspan="${p.type === 'formula' ? 3 : 2}">${open ? detail(p) : ''}</td></tr>`;
+  const note = listNote(p);
+  return `<tr class="package-row" data-key="${esc(key(p))}"><td><button class="package-button" aria-expanded="${open}" aria-controls="${esc(id)}"><span class="chevron" aria-hidden="true">${open ? '−' : '+'}</span><span class="package-name">${highlighted(p.name)}</span>${p.deprecated === true ? '<span class="deprecated-label">DEPRECATED</span>' : ''}${needsSecurityReview(p) ? '<span class="security-label">SECURITY REVIEW</span>' : ''}<span class="sr-only"> details</span></button><p class="description${note ? ' personal-note' : ''}">${highlighted(note || packageDescription(p))}</p></td><td class="version"><div class="version-content"><span class="installed-value" title="${esc(p.version)}">${esc(p.version)}</span>${p.availableVersion ? `<span class="available-version"><span class="available-value" title="${esc(p.availableVersion)}">Available: ${esc(p.availableVersion)}</span></span><button class="update-btn row-update" data-update="${esc(key(p))}">Update</button>` : ''}</div></td>${p.type === 'formula' ? `<td><span class="status ${p.leaf ? 'leaf' : ''}">${status(p)}</span>${p.direct ? '<span class="direct-label">DIRECT</span>' : ''}</td>` : ''}</tr><tr class="detail-row" id="${esc(id)}" ${open ? '' : 'hidden'}><td colspan="${p.type === 'formula' ? 3 : 2}">${open ? detail(p) : ''}</td></tr>`;
 }
 function countLabel(count, total) {
   return count === total ? `${count} total` : `${count} of ${total}`;
@@ -313,6 +320,7 @@ window.setInventory = function (data, { preserveView = true } = {}) {
   const view = preserveView ? captureInventoryView() : null;
   brewData = data;
   allPackages = [...data.formulae, ...data.casks];
+  usedByFormulaIDs = indexUsedByFormulae(data.formulae);
   updateSecurityFindings(data.securityCheck);
   // Snapshot replacement also invalidates cached metadata and package order.
   packageSearch = new Map(
@@ -340,6 +348,7 @@ window.setInventory = function (data, { preserveView = true } = {}) {
   render();
   refreshInventoryStatus();
   if (view) restoreInventoryView(view);
+  renderNotesLibrary();
 };
 
 // Patch security content in place unless the selected filter's membership changes.
