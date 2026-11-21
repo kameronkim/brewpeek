@@ -81,4 +81,22 @@ final class DesktopStateTests: XCTestCase {
       .appendingPathComponent("BrewPeek").appendingPathComponent("inventory.json")
     XCTAssertEqual(DesktopApp().output,expected)
   }
+
+  func testReopenTargetsExpireOnCancelAndOnlySuccessfulLaunchConsumesResultAction() throws {
+    _ = NSApplication.shared
+    let workspace = try CoreWorkspace(), app = DesktopApp(output: workspace.url("inventory.json"))
+    app.operation.quitRequests[.current] = QuitCaskApp(
+      packageID: "cask:fixture", path: workspace.url("Fixture.app").path, bundleID: "test.fixture")
+    app.handleUpdate(["action": "cancel"])
+    XCTAssertTrue(app.operation.quitRequests.isEmpty)
+
+    var web = WebRecoveryState()
+    web.remember(["kind": "result", "requestID": "latest", "reopenApps": ["one": ["name": "Fixture"]]])
+    web.remember(["kind": "reopenFinished", "resultID": "obsolete", "token": "one"])
+    web.remember(["kind": "reopenFinished", "resultID": "latest", "token": "one", "message": "Unavailable"])
+    XCTAssertNotNil((web.lastResult?["reopenApps"] as? [String: Record])?["one"])
+    web.remember(["kind": "reopenFinished", "resultID": "latest", "token": "one"])
+    let replay = try XCTUnwrap(web.replayEvents(plan: nil, requestID: nil).first)
+    XCTAssertTrue(try XCTUnwrap(replay["reopenApps"] as? [String: Record]).isEmpty)
+  }
 }

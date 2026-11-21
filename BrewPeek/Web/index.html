@@ -158,7 +158,13 @@
       <h2 id="notice-title"></h2>
       <p id="notice-copy"></p>
       <pre id="notice-command" hidden></pre>
-      <div class="dialog-actions"><button class="subtle-btn" id="notice-ok">OK</button></div>
+      <label id="notice-reopen-option" hidden>
+        <input type="checkbox" id="notice-reopen"><span id="notice-reopen-label"></span>
+      </label>
+      <div class="dialog-actions">
+        <button class="subtle-btn" id="notice-ok">OK</button>
+        <button class="update-btn bulk" id="schedule-quit" hidden>Quit when finished</button>
+      </div>
     </dialog>
     <dialog id="notes-library" aria-labelledby="notes-title">
       <h2 id="notes-title">Package Notes</h2>

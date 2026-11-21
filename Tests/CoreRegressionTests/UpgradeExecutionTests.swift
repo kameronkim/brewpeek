@@ -35,9 +35,18 @@ final class UpgradeExecutionTests: XCTestCase {
 
   func testMixedFormulaAndCompoundCaskVersionsRequireChangedInstallation() throws {
     let w = try CoreWorkspace()
+    let bundle = w.url("Sample.app"), contents = bundle.appendingPathComponent("Contents")
+    try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+    let bundleID = "test.brewpeek.sample"
+    try PropertyListSerialization.data(
+      fromPropertyList: ["CFBundlePackageType": "APPL", "CFBundleIdentifier": bundleID],
+      format: .binary, options: 0).write(to: contents.appendingPathComponent("Info.plist"))
+    let closed = QuitCaskApp(packageID: "cask:sample-app", path: bundle.path, bundleID: bundleID)
+    let wrongTap = QuitCaskApp(packageID: "cask:other/tap/sample-app", path: bundle.path, bundleID: bundleID)
+    let replaced = QuitCaskApp(packageID: closed.packageID, path: bundle.path, bundleID: "test.other.app")
     func mixed(_ updated:Bool)->Record {
       ["formulae":[["name":"node","full_name":"node","versions":["stable":"2.0"],"installed":[["version":updated ? "2.0":"1.0"]]]],
-       "casks":[["token":"sample-app","full_token":"sample-app","version":"2.0,abcdef1234567890","installed":updated ? "2.0,abcdef1234567890":"1.0,oldbuild","artifacts":[["app":["Sample.app"]]]]]]
+       "casks":[["token":"sample-app","full_token":"sample-app","version":"2.0,abcdef1234567890","installed":updated ? "2.0,abcdef1234567890":"1.0,oldbuild","artifacts":[["app":["Sample.app"],"target":bundle.path]]]]]
     }
     try w.json("before.json",mixed(false)); try w.json("after.json",mixed(true))
     try w.write("plan","==> Would upgrade 2 outdated packages\nnode 1.0 -> 2.0\nsample-app 1.0,oldbuild -> 2.0,abcdef1234567890\n")
@@ -52,11 +61,18 @@ final class UpgradeExecutionTests: XCTestCase {
     let engine = Upgrade(brew:brew), plan = try engine.prepare(keys:["formula:node","cask:sample-app"])
     XCTAssertEqual(plan.packages.count,2)
     XCTAssertTrue(plan.selected.contains { $0.argument == "homebrew/cask/sample-app" })
-    let rows = try XCTUnwrap(engine.execute(plan) { _ in }["packages"] as? [Record])
+    let result = try engine.execute(plan, quitApps: [closed, wrongTap, replaced]) { _ in }
+    let targets = try XCTUnwrap(result["reopenApps"] as? [String: Record])
+    XCTAssertEqual(targets.count, 1)
+    XCTAssertEqual(targets.values.first?["packageID"] as? String, closed.packageID)
+    XCTAssertEqual(targets.values.first?["path"] as? String, bundle.path)
+    let rows = try XCTUnwrap(result["packages"] as? [Record])
     XCTAssertTrue(rows.allSatisfy { $0["outcome"] as? String == "updated" })
     XCTAssertEqual(rows.first { $0["id"] as? String == "cask:sample-app" }?["actualVersion"] as? String,"2.0,abcdef1234567890")
     try w.remove("done"); try w.json("after.json",mixed(false))
-    let unchanged = try XCTUnwrap(engine.execute(plan) { _ in }["packages"] as? [Record])
+    let second = try engine.execute(plan, quitApps: [closed]) { _ in }
+    XCTAssertNil(second["reopenApps"])
+    let unchanged = try XCTUnwrap(second["packages"] as? [Record])
     XCTAssertTrue(unchanged.allSatisfy { $0["outcome"] as? String == "attention" })
   }
 }
