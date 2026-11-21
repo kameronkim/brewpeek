@@ -157,10 +157,26 @@ function showNotice(title, copy, command = '', kind = 'info') {
   $('notice-copy').textContent = copy;
   $('notice-command').textContent = command;
   $('notice-command').hidden = !command;
+  $('notice-reopen-option').hidden = true;
+  $('schedule-quit').hidden = kind !== 'update-quit';
+  $('notice-ok').textContent = kind === 'update-quit' ? 'Keep open' : 'OK';
   lockBackground();
   if (!$('notice').open) $('notice').showModal();
 }
-$('notice-ok').onclick = () => $('notice').close();
+$('notice-ok').onclick = () => {
+  if ($('notice').dataset.kind === 'update-quit')
+    postUpdate({ action: 'cancelScheduledQuit', requestID: activeRequest });
+  $('notice').close();
+};
+$('notice').addEventListener('cancel', (event) => {
+  if ($('notice').dataset.kind !== 'update-quit') return;
+  event.preventDefault();
+  $('notice-ok').click();
+});
+$('schedule-quit').onclick = () => {
+  postUpdate({ action: 'scheduleQuit', requestID: activeRequest, reopen: $('notice-reopen').checked });
+  $('notice').close();
+};
 $('notice').addEventListener('close', () => {
   if ($('notice').open) return;
   for (const id of ['notice-title', 'notice-copy', 'notice-command']) $(id).textContent = '';
@@ -445,6 +461,14 @@ function beginProgress(plan) {
   const phase = operationKind === 'version-cleanup' ? 'VERSION CLEANUP IN PROGRESS' : operationKind === 'cleanup' ? 'CLEANUP IN PROGRESS' : operationKind === 'uninstall' ? 'UNINSTALL IN PROGRESS' : 'UPDATE IN PROGRESS';
   const title = operationKind === 'version-cleanup' ? 'Removing old versions' : operationKind === 'cleanup' ? 'Removing unused dependencies' : operationKind === 'uninstall' ? `Uninstalling ${plan.packages[0].name}` : 'Updating packages';
   renderOperationSummary(phase, title, true);
+  if (operationKind === 'update') {
+    const status = document.createElement('div');
+    status.id = 'quit-status';
+    status.hidden = true;
+    status.innerHTML = '<span>Will quit when finished</span><button class="subtle-btn" aria-label="Cancel scheduled quit">Cancel</button>';
+    status.querySelector('button').onclick = () => postUpdate({ action: 'cancelScheduledQuit', requestID: activeRequest });
+    $('operation-copy').after(status);
+  }
   $('progress-items').ontoggle = () => paintProgress();
   $('progress-log').ontoggle = paintActivity;
   paintProgress(0);
@@ -522,6 +546,7 @@ function paintResult(result) {
     .join(' · ');
   const issues = result.packages.filter((p) => !['updated', 'installed', 'uninstalled', 'kept', 'removed'].includes(p.outcome));
   const notices = [];
+  if (result.reopenWarning) notices.push(result.reopenWarning);
   if (!result.verified) notices.push(uninstall ? 'Package registrations could not be checked.' : 'Installed versions could not be checked.');
   if (result.refreshError) notices.push('Inventory refresh failed; use Refresh to try again.');
   $('operation').innerHTML =
@@ -694,9 +719,31 @@ window.receiveUpdate = function (event) {
     case 'closeBlocked':
       showNotice('Operation in progress', event.message, '', 'exit');
       break;
+    case 'offerUpdateQuit': {
+      if ($('notice').open && $('notice').dataset.kind === 'update-quit') break;
+      showNotice('Update in progress', 'BrewPeek can quit after all packages update successfully.', '', 'update-quit');
+      const apps = event.apps;
+      if (apps.length) {
+        $('notice-reopen-label').textContent = `Reopen ${apps.length === 1 ? apps[0] : apps.length + ' apps'} before quitting`;
+        $('notice-reopen-option').hidden = false;
+      }
+      $('notice-reopen').checked = apps.length > 0 && event.reopen;
+      $('notice-ok').focus({ preventScroll: true });
+      break;
+    }
+    case 'quitScheduled':
+      if ($('quit-status')) $('quit-status').hidden = !event.scheduled;
+      break;
+    case 'reopeningForQuit':
+      if ($('notice').open && $('notice').dataset.kind === 'update-quit') $('notice').close();
+      $('operation-phase').textContent = 'UPDATE FINISHED';
+      $('operation-title').textContent = 'Reopening updated apps';
+      $('operation-copy').hidden = true;
+      break;
   }
 };
 function finishNotice() {
+  if ($('notice').open && $('notice').dataset.kind === 'update-quit') $('notice').close();
   if ($('notice').open && $('notice').dataset.kind === 'exit') {
     $('notice-title').textContent = 'Operation finished';
     $('notice-copy').textContent =

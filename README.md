@@ -87,6 +87,8 @@ Homebrew manages the downloads and installation order. Keep BrewPeek open until 
 
 If an app is running, choose **Quit app**, then **Retry** after it closes. Once its update succeeds, open **View results** and choose **Reopen** beside that app.
 
+To leave during an update, close the window or press ⌘Q and choose **Quit when finished**. BrewPeek quits after all updates succeed and the inventory is saved. If BrewPeek closed any apps for the update, you can have it reopen them first. This option starts checked and remembers your choice on this Mac. **Cancel** in the progress panel keeps BrewPeek open while the update continues.
+
 If Homebrew requires administrator permission during an update or uninstall, BrewPeek asks for your macOS account password in a secure input window. The password is not saved.
 
 ## Removing packages and old versions

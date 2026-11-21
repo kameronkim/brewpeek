@@ -59,7 +59,9 @@ final class DesktopApp: NSObject, NSApplicationDelegate, WKNavigationDelegate,
   var busy: Bool { auxiliaryBusy || webRecovery.isRestoring || operation.phase != .idle }
   var recoveryChecked = false
   let output: URL
-  init(output: URL? = nil) {
+  let preferences: UserDefaults
+  init(output: URL? = nil, preferences: UserDefaults = .standard) {
+    self.preferences = preferences
     self.output = output ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
       .appendingPathComponent("BrewPeek", isDirectory: true)
       .appendingPathComponent("inventory.json")

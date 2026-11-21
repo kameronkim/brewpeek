@@ -11,6 +11,7 @@ struct PackageOperationState {
   var control: UpgradePreparation?
   var blockedUpdateToken: String?
   var quitRequests: [NSRunningApplication: QuitCaskApp] = [:]
+  var updateQuit: UpdateQuit?
   var plan: PackageOperationPlan?
   var isPreparing: Bool { phase.isPreparing }
   var isExecuting: Bool { phase.isExecuting }

@@ -32,30 +32,34 @@ struct QuitCaskApp: Hashable {
     else { return nil }
     return url
   }
+
+  static func open(_ target: Record, completion: @escaping (String?) -> Void) {
+    guard let path = target["path"] as? String, let bundleID = target["bundleID"] as? String,
+      let url = installedURL(path: path, bundleID: bundleID) else {
+      completion("The updated app could not be found at its installed location.")
+      return
+    }
+    let config = NSWorkspace.OpenConfiguration()
+    config.createsNewApplicationInstance = false
+    NSWorkspace.shared.openApplication(at: url, configuration: config) { app, error in
+      let message = error?.localizedDescription ?? (app == nil ? "The app did not reopen." : nil)
+      DispatchQueue.main.async { completion(message) }
+    }
+  }
 }
 
 extension DesktopApp {
   func reopenUpdatedApp(token: String, resultID: String) {
     guard let result = webRecovery.lastResult, result["requestID"] as? String == resultID,
       let apps = result["reopenApps"] as? [String: Record], let target = apps[token],
-      let path = target["path"] as? String, let bundleID = target["bundleID"] as? String,
       openingApps.insert(token).inserted
     else { return }
-    func finish(_ error: String? = nil) {
-      openingApps.remove(token)
-      guard webRecovery.lastResult?["requestID"] as? String == resultID else { return }
+    QuitCaskApp.open(target) { error in
+      self.openingApps.remove(token)
+      guard self.webRecovery.lastResult?["requestID"] as? String == resultID else { return }
       var event: Record = ["kind": "reopenFinished", "resultID": resultID, "token": token]
       if let error { event["message"] = error }
-      sendUpdate(event)
-    }
-    guard let url = QuitCaskApp.installedURL(path: path, bundleID: bundleID) else {
-      finish("The updated app could not be found at its installed location.")
-      return
-    }
-    let config = NSWorkspace.OpenConfiguration()
-    config.createsNewApplicationInstance = false
-    NSWorkspace.shared.openApplication(at: url, configuration: config) { _, error in
-      DispatchQueue.main.async { finish(error?.localizedDescription) }
+      self.sendUpdate(event)
     }
   }
 }

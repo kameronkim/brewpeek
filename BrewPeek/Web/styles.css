@@ -1406,6 +1406,24 @@ body.modal-open {
   padding: 12px;
   font: 11px/1.7 var(--mono);
 }
+#notice-reopen-option, #quit-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+#notice-reopen-option {
+  margin-top: 20px;
+  font-size: 13px;
+}
+#notice-reopen {
+  margin: 0;
+  accent-color: var(--accent);
+}
+#quit-status {
+  margin-bottom: 12px;
+  color: var(--secondary);
+  font: 11px var(--mono);
+}
 #notice {
   max-height: calc(100dvh - 48px);
   overflow: auto;

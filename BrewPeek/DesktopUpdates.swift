@@ -33,6 +33,10 @@ extension DesktopApp {
       cancelUpdatePreparation()
       return
     }
+    if action == "scheduleQuit" || action == "cancelScheduledQuit" {
+      setUpdateQuit(action: action, request: request)
+      return
+    }
     guard !busy else { return }
 
     if ["prepare", "prepareUninstall", "prepareVersions"].contains(action),
@@ -190,7 +194,7 @@ extension DesktopApp {
           }.joined(separator: " && ")
           let completed = result
           DispatchQueue.main.async {
-            self.finishPackageOperation(completed, requestID: requestID)
+            self.finishUpdate(completed, requestID: requestID)
           }
         }
       } catch {
@@ -220,7 +224,12 @@ extension DesktopApp {
       return nil
     }
     guard beginPackageExecution(record: plan.record, requestID: requestID) else { return nil }
-    return Set(operation.quitRequests.compactMap { $0.key.isTerminated ? $0.value : nil })
+    let updatedIDs = Set(plan.packages.map(\.id))
+    let closedApps = Set(operation.quitRequests.compactMap { app, target in
+      app.isTerminated && updatedIDs.contains(target.packageID) ? target : nil
+    })
+    operation.updateQuit = UpdateQuit(closedApps: closedApps)
+    return closedApps
   }
 
   /// Retain the approved plan so Retry rechecks it instead of requesting approval again.
@@ -279,6 +288,14 @@ extension DesktopApp {
     })).sorted()
   }
   private func permitClose() -> Bool {
+    if let update = operation.updateQuit, let id = operation.requestID {
+      if update.isReopening {
+        sendUpdate(["kind": "closeBlocked", "message": "Waiting for the updated apps to reopen."])
+      } else {
+        sendUpdate(update.prompt(requestID: id, preferences: preferences))
+      }
+      return false
+    }
     guard
       operation.isExecuting || operation.hasPlan
     else {
