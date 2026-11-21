@@ -81,7 +81,7 @@ Use **Add note** in package details to jot down why you use a package. The list 
 
 Open **Report → Package Notes…** to search all saved notes by package name or note text. Removed packages are marked **Not installed**. Use **Delete note** to remove an individual note.
 
-When Homebrew confirms a rename within the same tap, package details also show notes saved under the former name. You can search their text and keep a separate note under the current name.
+When Homebrew confirms a rename within the same tap, package details also show notes saved under the former name. In **Package Notes**, you can find these notes by either name. You can also search their text and keep a separate note under the current name.
 
 ## Updating packages
 

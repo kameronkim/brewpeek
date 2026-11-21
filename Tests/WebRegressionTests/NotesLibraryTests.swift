@@ -3,6 +3,51 @@ import XCTest
 @testable import BrewPeek
 
 final class NotesLibraryTests: XCTestCase {
+  func testLibraryFindsRenamedPackagesAndDeletesOnlyTheNoteUnderTheSavedName() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = PackageNotes(file: directory.appendingPathComponent("notes.json"))
+    let notes = ["cask:docker": "Containers", "cask:docker-desktop": "New setup",
+      "formula:docker": "CLI only", "formula:vendor/tools/old": "Build", "formula:other/tools/old": "Other tap"]
+    for (id, text) in notes { _ = try store.save(id: id, text: text) }
+
+    let page = try WebTestPage(notesDirectory: directory)
+    try page.run("""
+      const app={id:'cask:docker-desktop',name:'docker-desktop',displayName:'Docker Desktop',type:'cask',
+        version:'1',apps:[],formerNoteIDs:['cask:docker']};
+      const tool={id:'formula:vendor/tools/new',name:'new',type:'formula',version:'1',formerNoteIDs:['formula:vendor/tools/old']};
+      const data={formulae:[tool],casks:[app],taps:[],environment:{}};
+      setInventory(data); await loadPackageNotes(); showPackageNotes();
+      const row=id=>[...notesList.children].find(li=>li.dataset.noteId===id);
+      const search=value=>{notesSearch.value=value;notesSearch.dispatchEvent(new Event('input'));};
+      assert(!row('cask:docker').textContent.includes('Not installed'),'Confirmed Cask rename is installed');
+      assert(row('formula:docker').textContent.includes('Not installed') && row('formula:other/tools/old').textContent.includes('Not installed'),
+        'Matching short names in another type or tap stay uninstalled');
+      for (const query of ['DOCKER-DESKTOP','Docker Desktop']) {
+        search(query);
+        assert(notesList.children.length===2 && row('cask:docker') && row('cask:docker-desktop'),'New name finds both separate Cask notes');
+      }
+      search('vendor/tools/new');
+      assert(notesList.children.length===1 && row('formula:vendor/tools/old').textContent.includes('vendor/tools/new'),
+        'Qualified current Formula name finds and identifies the note under the old tap-qualified name');
+      search('formula:vendor/tools/old'); assert(notesList.children.length===1,'Original ID remains searchable');
+      setInventory({...data,formulae:[]});
+      assert(row('formula:vendor/tools/old').textContent.includes('Not installed'),'Removing the renamed Formula updates the open library');
+      search('vendor/tools/new'); assert(!notesList.children.length,'Removed rename no longer matches its former installed identity');
+      setInventory(data); assert(notesList.children.length===1,'Reinstall restores the name match without changing the query');
+      search('docker-desktop');
+      row('cask:docker').querySelector('[data-action="ask"]').click();
+      row('cask:docker').querySelector('[data-action="delete"]').click();
+      return true;
+      """)
+    try page.wait { (try? page.run("return !deletingNote;") as? Bool) == true }
+    XCTAssertEqual(try store.read(), notes.filter { $0.key != "cask:docker" })
+    try page.run("""
+      assert(notesList.children.length===1 && notesList.firstElementChild.dataset.noteId==='cask:docker-desktop',
+        'Deleting the old note leaves the current note in the search results');return true;
+      """)
+  }
+
   func testReportMenuFindsInstalledAndRemovedNotesAndDeletesOnlyTheConfirmedNote() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
