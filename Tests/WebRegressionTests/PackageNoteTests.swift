@@ -61,6 +61,38 @@ final class PackageNoteTests: XCTestCase {
       """)
   }
 
+  func testUpdatePlanShowsSavedNotesForSelectedAndRelatedIdentities() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = PackageNotes(file: directory.appendingPathComponent("notes.json"))
+    _ = try store.save(id: "formula:demo", text: "After delivery")
+    _ = try store.save(id: "formula:vendor/tools/demo", text: "영상 <clip>")
+    let page = try WebTestPage(notesDirectory: directory)
+    try page.run("""
+      const pkg = (id, reason) => ({id, type:id.split(':')[0], name:'demo', version:'1',
+        availableVersion:'2', reason, apps:[]});
+      const a=pkg('formula:demo','Selected'), b=pkg('formula:vendor/tools/demo','Dependency'), c=pkg('cask:demo','Selected');
+      b.relationship='Required by demo';
+      setInventory({formulae:[a,b], casks:[c], taps:[], environment:{}});
+      const plan={selectedCount:2,packages:[a,b,c],token:'fixture'};
+      packageNotes.clear();
+      showPlan(plan,false);
+      const notes=()=>[...$('confirm-list').querySelectorAll('.confirmation-note:not([hidden])')];
+      assert(!notes().length,'A plan can open before the note store replies');
+      await loadPackageNotes();
+      assert(notes().length===2 && notes()[0].textContent==='After delivery' && notes()[1].textContent==='영상 <clip>',
+        'Selection and dependency notes follow their exact package IDs');
+      assert(!$('confirm-list').querySelector('clip') && $('confirm-list').rows[1].textContent.includes('Required by demo'),
+        'Notes render as text beneath the existing relationship');
+      assert($('confirm-list').rows[2].querySelector('.confirmation-note').getClientRects().length===0,
+        'Unannotated cask adds no space');
+      showPlan({...plan,packages:[c,a]},true);
+      assert(notes().length===1 && notes()[0].textContent==='After delivery','Rechecked plan drops removed dependencies');
+      return true;
+      """)
+    XCTAssertTrue(page.messages.values.isEmpty)
+  }
+
   func testNotesSurviveRefreshAndRelaunchAndFollowRemovalIdentities() throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -99,8 +131,8 @@ final class PackageNoteTests: XCTestCase {
         assert(row().querySelector('.personal-note'), 'Removing and reinstalling a package retains its note');
         const plan = {operation:'uninstall', token:'fixture', packages:[cask, formula], selectedCount:1};
         showPlan(plan, false);
-        assert([...document.querySelectorAll('#confirm-list .removal-note:not([hidden])')].length === 1 &&
-          document.querySelector('#confirm-list tr:nth-child(2) .removal-note').textContent === '영상 <clip>',
+        assert([...document.querySelectorAll('#confirm-list .confirmation-note:not([hidden])')].length === 1 &&
+          document.querySelector('#confirm-list tr:nth-child(2) .confirmation-note').textContent === '영상 <clip>',
           'Only matching removal target receives the note');
         return true;
         """)

@@ -12,6 +12,7 @@
 "Report" = "Report";
 "Refresh Inventory" = "Refresh Inventory";
 "Search Packages" = "Search Packages";
+"Package Notes…" = "Package Notes…";
 "Could not load the inventory. Please refresh to try again." = "Could not load the inventory. Please refresh to try again.";
 "Remove BrewPeek?" = "Remove BrewPeek?";
 "Move the app and its data to the Trash.\n\nYour Homebrew packages will be kept." = "Move the app and its data to the Trash.\n\nYour Homebrew packages will be kept.";

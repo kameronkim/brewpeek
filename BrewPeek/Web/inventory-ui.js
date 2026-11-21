@@ -106,6 +106,11 @@ window.setRefreshState = function (value) {
   syncActionAvailability();
 };
 window.focusPackageSearch = function () {
+  if ($('notes-library').open && !$('notice').open) {
+    $('notes-search').focus();
+    $('notes-search').select();
+    return;
+  }
   if (document.querySelector('dialog[open]')) return;
   $('search').focus({ preventScroll: true });
   $('search').select();

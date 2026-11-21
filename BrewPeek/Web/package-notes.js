@@ -61,18 +61,19 @@ function listNote(p) {
   return former.length === 1 ? former[0][1] : '';
 }
 
-function removalNote(id) {
+function confirmationNote(id) {
   const note = packageNotes.get(id);
-  return `<small class="dependency-note removal-note" data-removal-note="${esc(id)}"${note ? '' : ' hidden'}>${esc(note || '')}</small>`;
+  return `<small class="confirmation-note" data-confirmation-note="${esc(id)}"${note ? '' : ' hidden'}>${esc(note || '')}</small>`;
 }
 
 function refreshPackageNotes() {
+  renderNotesLibrary();
   if (!brewData) return;
   const view = captureInventoryView();
   render();
   restoreInventoryView(view);
-  for (const element of document.querySelectorAll('[data-removal-note]')) {
-    const note = packageNotes.get(element.dataset.removalNote);
+  for (const element of document.querySelectorAll('[data-confirmation-note]')) {
+    const note = packageNotes.get(element.dataset.confirmationNote);
     element.textContent = note || '';
     element.hidden = !note;
   }
@@ -104,6 +105,12 @@ function refreshNoteEditor(id) {
 function selectNoteControl(id, action) {
   const cell = document.getElementById('detail-' + encodeURIComponent(id));
   cell?.querySelector(`[data-note-action="${action}"]`)?.focus({preventScroll: true});
+}
+
+async function savePackageNote(id, text) {
+  const saved = await notesBridge.postMessage({action: 'save', id, text});
+  if (saved) packageNotes.set(id, saved);
+  else packageNotes.delete(id);
 }
 
 $('packages').addEventListener('input', event => {
@@ -140,9 +147,7 @@ $('packages').addEventListener('click', async event => {
   draft.error = '';
   refreshNoteEditor(id);
   try {
-    const saved = await notesBridge.postMessage({action: 'save', id, text: draft.text});
-    if (saved) packageNotes.set(id, saved);
-    else packageNotes.delete(id);
+    await savePackageNote(id, draft.text);
     noteDrafts.delete(id);
   } catch (error) {
     draft.error = 'Could not save the note. ' + String(error.message || error);

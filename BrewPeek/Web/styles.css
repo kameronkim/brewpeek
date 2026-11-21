@@ -201,7 +201,7 @@ h1 span {
   outline: 2px solid var(--accent);
   outline-offset: 0;
 }
-#search:focus {
+.searchbox input:focus {
   outline: none;
 }
 .searchbox {
@@ -217,7 +217,7 @@ h1 span {
   font: 20px var(--mono);
   color: var(--secondary);
 }
-#search {
+.searchbox input {
   background: none;
   border: 0;
   color: var(--text);
@@ -1612,7 +1612,8 @@ html,
 }
 .used-by-list { list-style: none; margin: 0; padding: 0; }
 .used-by-note { display: block; font: 12px/1.5 var(--sans); }
-.note-value, .removal-note, .used-by-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.note-value, .confirmation-note, .used-by-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.confirmation-note { display: block; margin-top: 4px; color: #c5cbbd; font: 13px/1.5 var(--sans); }
 .note-value { margin: 0 0 7px; font-family: var(--sans); }
 .note-editor {
   display: block;
@@ -1627,3 +1628,39 @@ html,
   font: 13px/1.5 var(--sans);
 }
 .note-editor:focus-visible { outline: 2px solid var(--accent); }
+
+#notes-library {
+  width: min(580px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+}
+#notes-library[open] { display: flex; flex-direction: column; }
+#notes-title { margin: 0 0 14px; }
+#notes-library .searchbox { flex: none; }
+#notes-list {
+  list-style: none;
+  padding: 0;
+  margin: 14px 0 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+#notes-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+#notes-list strong { font-family: var(--mono); overflow-wrap: anywhere; }
+#notes-list small { color: var(--secondary); margin-left: 8px; }
+#notes-list .note-value { margin: 4px 0 0; color: var(--text); }
+.note-confirm {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.note-confirm span { margin-right: auto; overflow-wrap: anywhere; }
+#notes-status { margin: 0 auto 0 0; }
+#notes-library .dialog-actions { align-items: center; margin-top: 12px; }
